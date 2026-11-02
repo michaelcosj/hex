@@ -1,0 +1,653 @@
+# Migration Guide
+
+This guide helps you migrate between major versions of `screencapturekit-rs`.
+
+> **Note:** The current release line is **11.x**. The sections below document
+> historical major-version migrations.
+> For changes in recent releases, see [`CHANGELOG.md`](../CHANGELOG.md).
+
+## Migrating from 10.x to 11.0
+
+Calls that can fail now return a `Result` instead of panicking, returning
+`None` without a reason, or ignoring their input. Most call sites need a `?`
+(or explicit handling) where the compiler asks for one.
+
+- `SCStream::new`, `SCStream::new_with_delegate` and `AsyncSCStream::new`
+  return `SCResult<Self>`. `AsyncSCStream::new` also returns the
+  output-handler registration error instead of a stream whose queue is already
+  closed.
+- `SCContentFilterBuilder::build` returns `SCResult<SCContentFilter>`;
+  `try_build` is removed.
+- `SCContentSharingPickerConfiguration::new` and `default_from_system`,
+  `SCContentSharingPicker::default_configuration`,
+  `SCRecordingOutputConfiguration::new` and `SCScreenshotConfiguration::new`
+  return `Result<_, SCError>` (`SCError::FeatureNotAvailable` on an older
+  macOS) instead of panicking. The `try_new` twins and the `Default` impls of
+  these three configuration types are removed.
+- String setters reject input they cannot pass on instead of ignoring it:
+  `SCStreamConfiguration::{set,with}_color_space_name`,
+  `{set,with}_color_matrix`, `{set,with}_stream_name` and
+  `{set,with}_microphone_capture_device_id` return `InteriorNulError`;
+  `SCRecordingOutputConfiguration::with_output_url` returns
+  `InvalidOutputPath`; `SCScreenshotConfiguration::{set,with}_file_path`
+  returns `InvalidScreenshotPath` and `with_content_type` returns
+  `InteriorNulError`; `SCContentSharingPickerConfiguration::
+  set_excluded_bundle_ids` returns `InteriorNulError`. The `with_*` builders
+  return `Result<Self, _>`, so a builder chain needs a `?` after each of them.
+  The `try_set_*` and `try_with_output_url` twins are removed.
+- `SCStreamConfiguration::set_presenter_overlay_privacy_alert_setting`,
+  `with_presenter_overlay_privacy_alert_setting` and
+  `presenter_overlay_privacy_alert_setting` return an `SCResult`:
+  `SCError::FeatureNotAvailable` before macOS 14, where they used to ignore
+  the value and report `System`, and `SCError::UnknownValue` from the getter
+  for a raw value this crate doesn't know.
+- Every other `SCStreamConfiguration` setter for a property that needs macOS
+  14.0, 14.2 or 15.0 (and its `with_*` builder) returns an `SCResult` too, with
+  `SCError::FeatureNotAvailable` on an older system instead of ignoring the
+  value; add a `?` after each in a builder chain. `set_stream_name` and
+  `set_microphone_capture_device_id` now report an interior NUL byte as
+  `SCError::InvalidConfiguration`. `from_preset` returns `SCResult<Self>`, and
+  `SCContentFilterBuilder::build` fails when `with_include_menu_bar` is used
+  before macOS 14.2.
+- Enum getters report values this crate doesn't know instead of a default:
+  `capture_dynamic_range`, `capture_resolution_type`, the filter and
+  content-info `style`, `stream_type` and the screenshot `display_intent` and
+  `dynamic_range` return an `SCResult` (`SCError::UnknownValue`), and
+  `MetalTexture::pixel_format` a `Result<_, MetalError>`. `SCFrameStatus` has
+  an `Unknown(i32)` variant (use `raw()` instead of `as i32`), and
+  `From<i32>` for `SCShareableContentStyle` and `SCStreamType` is now
+  `from_raw`, which returns `None` for an unknown value.
+- `SCStream::add_output_handler` and `add_output_handler_with_queue` return
+  `Result<usize, SCError>` instead of `Option<usize>`.
+  `remove_output_handler` returns `Result<bool, SCError>` and replaces
+  `try_remove_output_handler`. `AsyncSCStream::add_output_type` returns
+  `Result<(), SCError>` instead of `bool`.
+- `SCContentSharingPicker::add_observer` returns
+  `Result<SCPickerSubscription, SCPickerConfigurationError>`, and `present`,
+  `present_using_style`, `present_for_stream`,
+  `present_for_stream_using_style`, `set_active` and `set_maximum_stream_count`
+  return `Result<(), SCPickerConfigurationError>`.
+- Deprecated aliases are removed: use the `with_*` names on
+  `SCContentFilterBuilder` and `SCShareableContentOptions`, `pixel_buffer()`
+  instead of `CMSampleBufferExt::image_buffer`, and
+  `utils::completion::timed_out_context_count` instead of
+  `abandoned_context_count`. `SCStreamDelegateTrait::stream_did_stop` is gone
+  (the stream never called it); implement `did_stop_with_error`.
+- The `cm` audio types are apple-cf's: `sample.audio_buffer_list()` is
+  `CMSampleBuffer::audio_buffer_list` from apple-cf and returns
+  `Result<AudioBufferList, i32>`. The buffers are read-only; `unsafe
+  AudioBufferList::data_mut` is gone.
+- apple-cf 0.11 and apple-metal 0.10 changes reach you through the re-exported
+  `cg`, `cm`, `cv`, `dispatch_queue` and `apple_metal` modules, for example
+  `CMBlockBuffer::as_slice` and `cursor_ref` are now `unsafe`. See those
+  crates' changelogs.
+- Configurations are copied when they are handed to ScreenCaptureKit, so
+  changing one afterwards has no effect on a stream, recording output,
+  configuration update or screenshot that already received it. Call
+  `update_configuration` to change a running stream.
+- The minimum Rust version is 1.82.
+
+## Migrating from 9.x to 10.0
+
+- `AudioBufferList::get_mut` and `AudioBuffer::data_mut` were removed.
+  Mutable sample bytes are available through
+  `unsafe AudioBufferList::data_mut(index)`, which keeps the descriptor tied
+  to its owning block buffer.
+- Prefer `MetalDevice::create_buffer_with_bytes` with initialized bytes.
+  `create_buffer_with_data` is now `unsafe`; `Uniforms::to_bytes` provides the
+  safe encoding used by the examples.
+- Indexed Metal descriptor/encoder setters and command/encoder lifecycle
+  methods now return `Result<(), MetalError>`. Handle invalid indices,
+  repeated commit/end calls, and active encoders explicitly.
+- `SCPickerEvent::Updated` and `Cancelled` now carry
+  `stream: Option<StreamIdentity>`. `None` identifies a new selection;
+  `Some(identity)` can be compared with `SCStream::identity()`.
+- Picker configuration setters return
+  `Result<(), SCPickerConfigurationError>`, require the process main thread,
+  and complete their mutation before returning.
+- `CMSampleBufferExt::pixel_buffer()` replaces method-call uses of
+  `image_buffer()`. apple-cf now owns an inherent `image_buffer()` method that
+  returns the generic `CVImageBuffer`; use `pixel_buffer()` when a lockable
+  `CVPixelBuffer` is required.
+- Raw apple-cf adoption constructors such as `from_raw` and
+  `from_raw_borrowed` are unsafe. Locked pixel-buffer and IOSurface byte, row,
+  plane, and cursor views are also unsafe and return `Option`; handle a missing
+  address or unrepresentable length explicitly.
+- `CVPixelBufferLockFlags` now stores native-width `u64` flags. Use `bits()`
+  instead of `as_u32()`.
+
+## Migrating from 8.x to 9.0
+
+- The documented minimum macOS version is 13.0, matching the Swift package's
+  deployment target. Earlier releases advertised ScreenCaptureKit's own 12.3
+  floor, which the bridge never actually supported.
+- Recording codecs and file types are open string identifiers rather than
+  integer enums. Existing constants such as `H264`, `HEVC`, `MP4`, and `MOV`
+  remain available but are no longer `Copy`; use `identifier()` and
+  `from_identifier()` for values added by newer macOS releases.
+- `SCRecordingOutputDelegate` now requires `Send + Sync`.
+- `SCContentFilter` is immutable after construction. Set `includeMenuBar`
+  through `SCContentFilterBuilder::with_include_menu_bar`, and crop through
+  `SCStreamConfiguration::with_source_rect`; the nonfunctional content-rect
+  setters were removed.
+- `SCScreenshotOutput::file_url() -> Option<String>` was replaced by
+  `file_path() -> Option<PathBuf>`, and
+  `SCScreenshotConfiguration::with_file_path` now takes `impl AsRef<Path>`
+  (`&str` call sites are unchanged). Use `try_set_file_path` to detect
+  non-UTF-8 paths or interior NUL bytes instead of silently targeting a
+  different path.
+- `AudioBuffer`'s fields are private and read through accessors that validate
+  the descriptor. In 9.x, mutable access is
+  `unsafe AudioBuffer::data_mut()` on a buffer obtained from
+  `AudioBufferList::get_mut(index)`; the caller must guarantee the sample
+  buffer outlives the slice and that no other alias exists. Version 10 removes
+  both methods in favor of the owner-tied API described above.
+- `MetalDevice::as_apple_metal` returns a lifetime-bound
+  `BorrowedAppleMetalDevice<'_>` rather than an owned `apple-metal` device.
+- `SCShareableContent::current_process` returns `SCError::FeatureNotAvailable`
+  below macOS 14.4 instead of falling back to a system-wide content query. Gate
+  on `SCShareableContent::current_process_is_available()` if you need to branch.
+- `SCStream::update_configuration` now requires the `macos_14_0` feature,
+  matching Apple's availability. `update_content_filter` is unchanged.
+- Build-SDK stubs are no longer supported. Enabling a `macos_*` feature whose
+  API is absent from the selected SDK fails during `build.rs`; select a matching
+  Xcode or remove the feature.
+
+## Migrating from 7.x to 8.0
+
+- `AsyncSCStream` lifecycle methods now return futures; add `.await`, or use
+  the synchronous `SCStream` methods for blocking calls.
+- Stream stops are reported only through
+  `SCStreamDelegateTrait::did_stop_with_error`. The redundant `stream_did_stop`
+  callback is deprecated.
+
+## Migrating from 1.x to 2.0
+
+Version 2.0 hardens the FFI boundary. Most projects can upgrade by
+bumping the dependency and addressing a handful of compile errors —
+no design-level rework is required.
+
+### Cargo.toml
+
+```diff
+ [dependencies]
+-screencapturekit = "1"
++screencapturekit = "2"
+```
+
+### `Send + Sync` bound on output / delegate traits
+
+`SCStreamOutputTrait` and `SCStreamDelegateTrait` (and the `Fn(...)` closure
+overloads) now require `Send + Sync`. Apple's dispatch queues may invoke the
+handler concurrently from arbitrary threads, so any state owned by the
+handler must be thread-safe.
+
+**Before (1.x):**
+```rust,ignore
+struct Handler { count: std::cell::Cell<usize> }   // !Sync — compiles in 1.x
+impl SCStreamOutputTrait for Handler { /* ... */ }
+```
+
+**After (2.0):**
+```rust,ignore
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct Handler { count: AtomicUsize }              // Send + Sync
+impl SCStreamOutputTrait for Handler {
+    fn did_output_sample_buffer(&self, _: CMSampleBuffer, _: SCStreamOutputType) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+```
+
+For closures: replace `Cell` / `Rc` with `Arc<Atomic*>` /
+`Arc<Mutex<...>>` / `Arc<RwLock<...>>`.
+
+### `PixelFormat::Unknown(FourCharCode)`
+
+`PixelFormat` is now `#[non_exhaustive]` and surfaces unrecognised codes
+via a new `Unknown(FourCharCode)` variant instead of mapping them to
+`BGRA`. This means **every `match` over `PixelFormat` must include a
+wildcard arm**:
+
+**Before (1.x):**
+```rust,ignore
+match config.pixel_format() {
+    PixelFormat::BGRA => { /* ... */ }
+    PixelFormat::YCbCr420v => { /* ... */ }
+    PixelFormat::YCbCr420f => { /* ... */ }
+    PixelFormat::L10R => { /* ... */ }
+}
+```
+
+**After (2.0):**
+```rust,ignore
+match config.pixel_format() {
+    PixelFormat::BGRA => { /* ... */ }
+    PixelFormat::YCbCr420v => { /* ... */ }
+    PixelFormat::YCbCr420f => { /* ... */ }
+    PixelFormat::L10R => { /* ... */ }
+    PixelFormat::Unknown(code) => eprintln!("unrecognised pixel format: {code}"),
+    _ => { /* future variants */ }
+}
+```
+
+`PartialEq` / `Hash` are now normalised through `FourCharCode`, so two
+representations of the same OSType (e.g. `PixelFormat::BGRA` vs
+`PixelFormat::Unknown(FourCharCode::from_bytes(*b"BGRA"))`) compare equal.
+
+### `SCStreamErrorCode` is `#[non_exhaustive]`
+
+`match` arms over `SCStreamErrorCode` (typically inside an
+`SCError::StreamError { code, .. }` arm) now require a wildcard:
+
+```rust,ignore
+match err_code {
+    SCStreamErrorCode::UserStopped => { /* graceful */ }
+    SCStreamErrorCode::UserDeclined => { /* permission */ }
+    _ => { /* anything Apple adds in a future macOS */ }
+}
+```
+
+### Build-time SDK enforcement
+
+The build script no longer silently degrades when xcrun / SDK detection
+fails — it bails with a clear error pointing at `xcode-select`. Make sure
+Xcode Command Line Tools are installed and selected:
+
+```bash
+xcode-select --install
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+```
+
+Every `macos_*` Cargo feature is also forwarded to the Swift compile, so
+a feature only enabled on the Rust side (which used to silently miss the
+matching Swift symbols) will now produce a coherent linker error.
+
+### New APIs you can opt into
+
+- `SCContentSharingPicker::is_active()` / `set_is_active()` — query and
+  toggle the picker's idle state without recreating it.
+- `SCContentSharingPicker::default_configuration()` — read the system
+  default `SCContentSharingPickerConfiguration` so user-facing pickers
+  match macOS defaults.
+- `CMSampleBuffer::presenter_overlay_content_rect()` (and the matching
+  field on `frame_info()`) — the new Presenter Overlay layout rect.
+
+## Migrating from 2.0 to 2.1
+
+2.1 is fully backwards-compatible with 2.0 — no source changes required.
+New optional APIs:
+
+- `CGImage::rgba_data_into(&mut [u8])` and `bgra_data_into(&mut [u8])` —
+  render into a caller-supplied buffer to amortise the per-call
+  `width*height*4` byte allocation across many screenshots.
+- Native-BGRA fast path in `SCScreenshotManager` skips the channel swap
+  for downstreams that accept BGRA directly (Metal / wgpu / ffmpeg).
+
+## Migrating from 2.1 to 3.0
+
+3.0 migrates the Core Graphics / Core Media / IOSurface / Core Video
+foundation types onto the shared
+[`apple-cf`](https://crates.io/crates/apple-cf) and
+[`apple-metal`](https://crates.io/crates/apple-metal) crates, eliminating
+`screencapturekit`'s private nominal duplicates. Most affected types are now
+**re-exports**, so `use screencapturekit::cg::CGRect;` (or the prelude) keeps
+working unchanged.
+
+The one source-level change: the ScreenCaptureKit-specific accessors on
+`CMSampleBuffer` moved to **extension traits**. Bring them into scope to call
+them:
+
+```rust,ignore
+use screencapturekit::cm::{CMSampleBufferExt, CMSampleBufferSCExt};
+// now `sample.pixel_buffer()`, `sample.frame_status()`, … resolve
+```
+
+The prelude already re-exports both traits, so `use screencapturekit::prelude::*;`
+is enough.
+
+## Migrating from 3.x to 4.0
+
+4.0 removes duplicated Core Media / Core Graphics value types from the public
+API in favour of the canonical `apple-cf` ones:
+
+- `ScreenshotManager::capture_image` now returns `apple_cf::cg::CGImage`.
+- `screencapturekit::cm::CMTime` is now a re-export of `apple_cf::cm::CMTime`.
+
+If you previously converted between `screencapturekit`'s types and `apple-cf`'s
+when chaining into ImageIO / VideoToolbox, **delete those conversions** — the
+types are now identical.
+
+## Migrating from 4.0 to 5.0
+
+5.0 adopts `apple-cf` 0.8's **nested `CGRect` layout**. Flat field *access*
+becomes nested through `origin` / `size`:
+
+```diff
+-let x = rect.x;
+-let w = rect.width;
++let x = rect.origin.x;
++let w = rect.size.width;
+```
+
+The convenience constructor is unchanged — `CGRect::new(x, y, w, h)` still
+takes four flat coordinates.
+
+## Migrating from 5.0 to 6.0
+
+6.0 re-exports the final Core Media timing types from `apple-cf`:
+`screencapturekit::cm::{CMSampleTimingInfo, CMClock}` are now re-exports of
+`apple_cf::cm::{CMSampleTimingInfo, CMClock}`. As with 4.0, drop any manual
+conversions between the previously-distinct types. No other source changes are
+required.
+
+> The 4.0 → 6.0 bumps are all driven by consolidating onto `apple-cf`; if your
+> code only used `screencapturekit`'s own types (via the prelude or
+> `screencapturekit::{cg, cm}`) the upgrade is typically just the `CGRect`
+> field-access change from 5.0.
+
+## Migrating from 6.0 to 7.0
+
+7.0 is an FFI-hardening release with **no required source changes** for typical
+users. It is a major version only because of conservative semver around two
+low-level changes:
+
+- **`AudioBufferRef::data()` lifetime.** The returned slice is now tied to the
+  lifetime `'a` of the wrapped audio buffer rather than the `&self` borrow.
+  This *relaxes* the borrow (the slice may now outlive the `&self` reference),
+  so existing call sites keep compiling unchanged.
+- **Strided pixel render + locked `IOSurface` CPU view.** New additive helpers
+  [`CGImageExt::rgba_data_into_strided`](../src/screenshot_manager.rs) /
+  `bgra_data_into_strided` render into a caller-supplied buffer using an
+  explicit row stride, so consumers with padded/row-aligned buffers (GPU
+  upload, `wgpu`) aren't forced into tight packing. The existing
+  `rgba_data_into` / `bgra_data_into` paths are unchanged.
+
+Everything else is internal: `MaybeUninit` scratch buffers for batched FFI
+calls, null-checked constructors, and consolidated retain/release wrappers.
+
+## Migrating to the next major version (unreleased)
+
+The `async` stream lifecycle methods are now genuinely asynchronous. Previously
+`AsyncSCStream::start_capture` / `stop_capture` / `update_configuration` /
+`update_content_filter` returned `Result<(), SCError>` and **blocked the calling
+thread** on a condition variable until ScreenCaptureKit acknowledged the
+operation — which stalls single-threaded / current-thread executors. They now
+return a `StreamControlFuture` you `.await`:
+
+```diff
+- stream.start_capture()?;
+- stream.stop_capture()?;
++ stream.start_capture().await?;
++ stream.stop_capture().await?;
+```
+
+```diff
+- stream.update_configuration(&config)?;
+- stream.update_content_filter(&filter)?;
++ stream.update_configuration(&config).await?;
++ stream.update_content_filter(&filter).await?;
+```
+
+Awaiting now parks the task via its `Waker` and resumes from the Swift
+completion callback, so it never blocks the executor — matching the rest of the
+`async_api` (content queries, screenshots, picker, frame iteration) and the
+underlying Swift `Task { try await … }` entry points. The returned
+`StreamControlFuture` is `Send`, so it can be moved across `tokio::spawn`.
+
+If you specifically want a **blocking** call (e.g. from synchronous code), reach
+through to the synchronous stream with `stream.inner().start_capture()` — the
+`SCStream` methods are unchanged.
+
+## Migrating from 0.x to 1.0
+
+Version 1.0 introduced a complete API redesign with builder patterns, async support, and new macOS features.
+
+### Configuration API Changes
+
+**Before (0.x):**
+```rust
+use screencapturekit::sc_stream_configuration::UnsafeSCStreamConfiguration;
+
+let mut config = UnsafeSCStreamConfiguration::default();
+config.set_width(1920);
+config.set_height(1080);
+config.set_shows_cursor(true);
+```
+
+**After (1.0):**
+```rust
+use screencapturekit::prelude::*;
+
+let config = SCStreamConfiguration::new()
+    .with_width(1920)
+    .with_height(1080)
+    .with_shows_cursor(true);
+```
+
+### Content Filter API Changes
+
+**Before (0.x):**
+```rust
+use screencapturekit::sc_content_filter::UnsafeSCContentFilter;
+
+let filter = UnsafeSCContentFilter::new(display);
+```
+
+**After (1.0):**
+```rust
+use screencapturekit::prelude::*;
+
+let filter = SCContentFilter::create()
+    .with_display(&display)
+    .with_excluding_windows(&[])
+    .build();
+```
+
+### Stream Creation Changes
+
+**Before (0.x):**
+```rust
+use screencapturekit::sc_stream::UnsafeSCStream;
+
+let stream = UnsafeSCStream::new(filter, config, handler);
+stream.start_capture();
+```
+
+**After (1.0):**
+```rust
+use screencapturekit::prelude::*;
+
+let mut stream = SCStream::new(&filter, &config);
+stream.add_output_handler(handler, SCStreamOutputType::Screen);
+stream.start_capture()?;
+```
+
+### Handler Trait Changes
+
+**Before (0.x):**
+```rust
+impl StreamOutput for MyHandler {
+    fn stream_output(&self, sample: CMSampleBuffer, _of_type: SCStreamOutputType) {
+        // process sample
+    }
+}
+```
+
+**After (1.0):**
+```rust
+impl SCStreamOutputTrait for MyHandler {
+    fn did_output_sample_buffer(&self, sample: CMSampleBuffer, _of_type: SCStreamOutputType) {
+        // process sample
+    }
+}
+```
+
+### Closure Handlers (New in 1.0)
+
+You can now use closures instead of implementing traits:
+
+```rust
+stream.add_output_handler(
+    |sample: CMSampleBuffer, output_type: SCStreamOutputType| {
+        println!("Got frame!");
+    },
+    SCStreamOutputType::Screen
+);
+```
+
+### Error Handling
+
+**Before (0.x):**
+```rust
+// Errors were often panics or Option<T>
+let content = SCShareableContent::get().unwrap();
+```
+
+**After (1.0):**
+```rust
+// Proper Result<T, SCError> types
+let content = SCShareableContent::get()?;
+```
+
+### Module Path Changes
+
+| 0.x Path | 1.0 Path |
+|----------|----------|
+| `screencapturekit::sc_stream::*` | `screencapturekit::stream::*` |
+| `screencapturekit::sc_stream_configuration::*` | `screencapturekit::stream::configuration::*` |
+| `screencapturekit::sc_content_filter::*` | `screencapturekit::stream::content_filter::*` |
+| `screencapturekit::sc_shareable_content::*` | `screencapturekit::shareable_content::*` |
+
+**Recommended:** Use the prelude for common types:
+
+```rust
+use screencapturekit::prelude::*;
+```
+
+### Feature Flag Changes
+
+| 0.x | 1.0 |
+|-----|-----|
+| N/A | `async` - Async API support |
+| N/A | `macos_13_0` - Audio capture |
+| N/A | `macos_14_0` - Screenshots, content picker |
+| N/A | `macos_14_2` - Menu bar, child windows |
+| N/A | `macos_15_0` - Recording, HDR, microphone |
+| N/A | `macos_15_2` - Screenshot in rect |
+| N/A | `macos_26_0` - Advanced screenshot config |
+
+## Migrating from 1.0 to 1.1
+
+### Builder Method Rename
+
+**Before (1.0.0):**
+```rust
+let filter = SCContentFilter::build()
+    .with_display(&display)
+    .with_excluding_windows(&[])
+    .build();
+```
+
+**After (1.1+):**
+```rust
+let filter = SCContentFilter::create()  // build() → create()
+    .with_display(&display)
+    .with_excluding_windows(&[])
+    .build();
+```
+
+### Configuration Setters
+
+**Before (1.0.0):**
+```rust
+let mut config = SCStreamConfiguration::new();
+config.set_width(1920);  // Returns &mut Self
+config.set_height(1080);
+```
+
+**After (1.1+):**
+```rust
+let config = SCStreamConfiguration::new()
+    .with_width(1920)   // Chainable
+    .with_height(1080);
+```
+
+## Migrating from 1.1/1.2 to 1.3+
+
+### Content Picker API
+
+**Before (1.2):**
+```rust
+// Blocking API
+let result = SCContentSharingPicker::pick(&config)?;
+```
+
+**After (1.3+):**
+```rust
+// Callback-based API
+SCContentSharingPicker::show(&config, |outcome| {
+    match outcome {
+        SCPickerOutcome::Picked(result) => { /* use result */ }
+        SCPickerOutcome::Cancelled => { /* handle cancel */ }
+        SCPickerOutcome::Error(e) => { /* handle error */ }
+    }
+});
+
+// Or async (with async feature)
+let outcome = AsyncSCContentSharingPicker::show(&config).await;
+```
+
+### Getter Method Naming
+
+The `get_` prefix was removed from getters:
+
+**Before:**
+```rust
+let width = config.get_width();
+let rect = filter.get_content_rect();
+let time = sample.get_presentation_timestamp();
+```
+
+**After:**
+```rust
+let width = config.width();
+let rect = filter.content_rect();
+let time = sample.presentation_timestamp();
+```
+
+### CMSampleBuffer Methods
+
+**Before:**
+```rust
+sample.get_image_buffer()
+sample.get_format_description()
+```
+
+**After:**
+```rust
+sample.pixel_buffer()
+sample.format_description()
+```
+
+## Deprecated APIs
+
+The following APIs are deprecated and will be removed in future versions:
+
+| Deprecated | Replacement |
+|------------|-------------|
+| `SCStreamConfiguration::builder()` | `SCStreamConfiguration::new()` |
+| `config.get_*()` methods | `config.*()` (without get_ prefix) |
+
+## Quick Migration Checklist
+
+- [ ] Update `Cargo.toml` to new version
+- [ ] Replace `Unsafe*` types with safe equivalents
+- [ ] Use `prelude::*` for common imports
+- [ ] Replace trait implementations with closures (optional)
+- [ ] Update handler trait name to `SCStreamOutputTrait`
+- [ ] Add `?` for error handling (functions now return `Result`)
+- [ ] Add feature flags for version-specific APIs
+- [ ] Remove `get_` prefix from getter calls
+- [ ] Update `SCContentFilter::build()` to `::create()`

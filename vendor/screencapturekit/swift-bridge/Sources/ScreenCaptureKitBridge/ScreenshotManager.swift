@@ -1,0 +1,752 @@
+// Screenshot Manager APIs (macOS 14.0+)
+
+import CoreGraphics
+import CoreMedia
+import Foundation
+import ScreenCaptureKit
+import UniformTypeIdentifiers
+
+// MARK: - Screenshot Manager (macOS 14.0+)
+
+#if SCREENCAPTUREKIT_HAS_MACOS14_SDK
+    @_cdecl("sc_screenshot_manager_capture_image")
+    public func captureScreenshot(
+        _ contentFilter: OpaquePointer,
+        _ config: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        if #available(macOS 14.0, *) {
+            let filter: SCContentFilter = unretained(contentFilter)
+            let configuration: SCStreamConfiguration = unretained(config)
+
+            Task {
+                do {
+                    let image = try await SCScreenshotManager.captureImage(
+                        contentFilter: filter,
+                        configuration: configuration
+                    )
+                    callback(retain(image), nil, userData)
+                } catch {
+                    let bridgeError = SCBridgeError.screenshotError(error.localizedDescription)
+                    bridgeError.description.withCString { callback(nil, $0, userData) }
+                }
+            }
+        } else {
+            let bridgeError = SCBridgeError.screenshotError(
+                "SCScreenshotManager.captureImage requires macOS 14.0+")
+            bridgeError.description.withCString { callback(nil, $0, userData) }
+        }
+    }
+
+    @_cdecl("sc_screenshot_manager_capture_sample_buffer")
+    public func captureScreenshotSampleBuffer(
+        _ contentFilter: OpaquePointer,
+        _ config: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        if #available(macOS 14.0, *) {
+            let filter: SCContentFilter = unretained(contentFilter)
+            let configuration: SCStreamConfiguration = unretained(config)
+
+            Task {
+                do {
+                    let sampleBuffer = try await SCScreenshotManager.captureSampleBuffer(
+                        contentFilter: filter,
+                        configuration: configuration
+                    )
+                    let retained = Unmanaged.passRetained(sampleBuffer as AnyObject)
+                    callback(OpaquePointer(retained.toOpaque()), nil, userData)
+                } catch {
+                    let bridgeError = SCBridgeError.screenshotError(error.localizedDescription)
+                    bridgeError.description.withCString { callback(nil, $0, userData) }
+                }
+            }
+        } else {
+            let bridgeError = SCBridgeError.screenshotError(
+                "SCScreenshotManager.captureSampleBuffer requires macOS 14.0+")
+            bridgeError.description.withCString { callback(nil, $0, userData) }
+        }
+    }
+#else
+    @_cdecl("sc_screenshot_manager_capture_image")
+    public func captureScreenshot(
+        _: OpaquePointer,
+        _: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        let bridgeError = SCBridgeError.screenshotError(
+            "SCScreenshotManager requires a macOS 14.0+ SDK")
+        bridgeError.description.withCString { callback(nil, $0, userData) }
+    }
+
+    @_cdecl("sc_screenshot_manager_capture_sample_buffer")
+    public func captureScreenshotSampleBuffer(
+        _: OpaquePointer,
+        _: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        let bridgeError = SCBridgeError.screenshotError(
+            "SCScreenshotManager requires a macOS 14.0+ SDK")
+        bridgeError.description.withCString { callback(nil, $0, userData) }
+    }
+#endif
+
+// MARK: - Capture image in rect (macOS 15.2+)
+
+#if SCREENCAPTUREKIT_HAS_MACOS15_2_SDK
+    @_cdecl("sc_screenshot_manager_capture_image_in_rect")
+    public func captureScreenshotInRect(
+        _ x: Double,
+        _ y: Double,
+        _ width: Double,
+        _ height: Double,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        if #available(macOS 15.2, *) {
+            let rect = CGRect(x: x, y: y, width: width, height: height)
+            Task {
+                do {
+                    let image = try await SCScreenshotManager.captureImage(in: rect)
+                    callback(retain(image), nil, userData)
+                } catch {
+                    let bridgeError = SCBridgeError.screenshotError(error.localizedDescription)
+                    bridgeError.description.withCString { callback(nil, $0, userData) }
+                }
+            }
+        } else {
+            let bridgeError = SCBridgeError.screenshotError("captureImageInRect requires macOS 15.2+")
+            bridgeError.description.withCString { callback(nil, $0, userData) }
+        }
+    }
+#else
+    @_cdecl("sc_screenshot_manager_capture_image_in_rect")
+    public func captureScreenshotInRect(
+        _: Double,
+        _: Double,
+        _: Double,
+        _: Double,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        let bridgeError = SCBridgeError.screenshotError("captureImageInRect requires macOS 15.2+")
+        bridgeError.description.withCString { callback(nil, $0, userData) }
+    }
+#endif
+
+// MARK: - SCScreenshotConfiguration (macOS 26.0+)
+
+#if SCREENCAPTUREKIT_HAS_MACOS26_SDK
+    @_cdecl("sc_screenshot_configuration_create")
+    public func createScreenshotConfiguration() -> OpaquePointer? {
+        if #available(macOS 26.0, *) {
+            let config = SCScreenshotConfiguration()
+            return retain(config)
+        }
+        return nil
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_width")
+    public func setScreenshotConfigurationWidth(_ config: OpaquePointer, _ width: Int) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.width = width
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_height")
+    public func setScreenshotConfigurationHeight(_ config: OpaquePointer, _ height: Int) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.height = height
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_shows_cursor")
+    public func setScreenshotConfigurationShowsCursor(_ config: OpaquePointer, _ showsCursor: Bool) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.showsCursor = showsCursor
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_source_rect")
+    public func setScreenshotConfigurationSourceRect(_ config: OpaquePointer, _ x: Double, _ y: Double, _ width: Double, _ height: Double) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.sourceRect = CGRect(x: x, y: y, width: width, height: height)
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_destination_rect")
+    public func setScreenshotConfigurationDestinationRect(_ config: OpaquePointer, _ x: Double, _ y: Double, _ width: Double, _ height: Double) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.destinationRect = CGRect(x: x, y: y, width: width, height: height)
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_ignore_shadows")
+    public func setScreenshotConfigurationIgnoreShadows(_ config: OpaquePointer, _ ignoreShadows: Bool) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.ignoreShadows = ignoreShadows
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_ignore_clipping")
+    public func setScreenshotConfigurationIgnoreClipping(_ config: OpaquePointer, _ ignoreClipping: Bool) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.ignoreClipping = ignoreClipping
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_include_child_windows")
+    public func setScreenshotConfigurationIncludeChildWindows(_ config: OpaquePointer, _ includeChildWindows: Bool) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.includeChildWindows = includeChildWindows
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_display_intent")
+    public func setScreenshotConfigurationDisplayIntent(_ config: OpaquePointer, _ displayIntent: Int32) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            switch displayIntent {
+            case 0: c.displayIntent = .canonical
+            case 1: c.displayIntent = .local
+            default: return false
+            }
+            return true
+        }
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_dynamic_range")
+    public func setScreenshotConfigurationDynamicRange(_ config: OpaquePointer, _ dynamicRange: Int32) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            switch dynamicRange {
+            case 0: c.dynamicRange = .sdr
+            case 1: c.dynamicRange = .hdr
+            case 2: c.dynamicRange = .bothSDRAndHDR
+            default: return false
+            }
+            return true
+        }
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_file_url")
+    public func setScreenshotConfigurationFileURL(_ config: OpaquePointer, _ path: UnsafePointer<CChar>) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            let pathString = String(cString: path)
+            c.fileURL = URL(fileURLWithPath: pathString)
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_width")
+    public func getScreenshotConfigurationWidth(_ config: OpaquePointer) -> Int {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            return c.width
+        }
+        return 0
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_height")
+    public func getScreenshotConfigurationHeight(_ config: OpaquePointer) -> Int {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            return c.height
+        }
+        return 0
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_shows_cursor")
+    public func getScreenshotConfigurationShowsCursor(_ config: OpaquePointer) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            return c.showsCursor
+        }
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_source_rect")
+    public func getScreenshotConfigurationSourceRect(
+        _ config: OpaquePointer,
+        _ x: UnsafeMutablePointer<Double>,
+        _ y: UnsafeMutablePointer<Double>,
+        _ width: UnsafeMutablePointer<Double>,
+        _ height: UnsafeMutablePointer<Double>
+    ) {
+        var rect = CGRect.zero
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            rect = c.sourceRect
+        }
+        x.pointee = rect.origin.x
+        y.pointee = rect.origin.y
+        width.pointee = rect.size.width
+        height.pointee = rect.size.height
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_destination_rect")
+    public func getScreenshotConfigurationDestinationRect(
+        _ config: OpaquePointer,
+        _ x: UnsafeMutablePointer<Double>,
+        _ y: UnsafeMutablePointer<Double>,
+        _ width: UnsafeMutablePointer<Double>,
+        _ height: UnsafeMutablePointer<Double>
+    ) {
+        var rect = CGRect.zero
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            rect = c.destinationRect
+        }
+        x.pointee = rect.origin.x
+        y.pointee = rect.origin.y
+        width.pointee = rect.size.width
+        height.pointee = rect.size.height
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_ignore_shadows")
+    public func getScreenshotConfigurationIgnoreShadows(_ config: OpaquePointer) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            return c.ignoreShadows
+        }
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_ignore_clipping")
+    public func getScreenshotConfigurationIgnoreClipping(_ config: OpaquePointer) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            return c.ignoreClipping
+        }
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_include_child_windows")
+    public func getScreenshotConfigurationIncludeChildWindows(_ config: OpaquePointer) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            return c.includeChildWindows
+        }
+        return false
+    }
+
+    /// Writes the raw display intent (0 = canonical, 1 = local) and returns false before macOS 26.
+    @_cdecl("sc_screenshot_configuration_get_display_intent")
+    public func getScreenshotConfigurationDisplayIntent(
+        _ config: OpaquePointer,
+        _ outIntent: UnsafeMutablePointer<Int32>
+    ) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            outIntent.pointee = Int32(clamping: c.displayIntent.rawValue)
+            return true
+        }
+        return false
+    }
+
+    /// Writes the raw dynamic range (0 = sdr, 1 = hdr, 2 = bothSDRAndHDR) and returns false before macOS 26.
+    @_cdecl("sc_screenshot_configuration_get_dynamic_range")
+    public func getScreenshotConfigurationDynamicRange(
+        _ config: OpaquePointer,
+        _ outRange: UnsafeMutablePointer<Int32>
+    ) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            outRange.pointee = Int32(clamping: c.dynamicRange.rawValue)
+            return true
+        }
+        return false
+    }
+
+    /// Get the configured output file path as an owned string (caller frees
+    /// with `sc_free_string`). File paths have no useful upper bound, so this
+    /// avoids making the caller guess a buffer size.
+    @_cdecl("sc_screenshot_configuration_get_file_path_owned")
+    public func getScreenshotConfigurationFilePathOwned(_ config: OpaquePointer) -> UnsafeMutablePointer<CChar>? {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            guard let url = c.fileURL else { return nil }
+            return url.withUnsafeFileSystemRepresentation { path -> UnsafeMutablePointer<CChar>? in
+                guard let path else { return nil }
+                return strdup(path)
+            }
+        }
+        return nil
+    }
+
+    /// Clear any configured output file URL.
+    @_cdecl("sc_screenshot_configuration_clear_file_url")
+    public func clearScreenshotConfigurationFileURL(_ config: OpaquePointer) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            c.fileURL = nil
+        }
+    }
+
+    @_cdecl("sc_screenshot_configuration_release")
+    public func releaseScreenshotConfiguration(_ config: OpaquePointer) {
+        release(config)
+    }
+
+    // MARK: - Content Type Support (macOS 26.0+)
+
+    /// Set the content type (output format) using UTType identifier
+    @_cdecl("sc_screenshot_configuration_set_content_type")
+    public func setScreenshotConfigurationContentType(_ config: OpaquePointer, _ identifier: UnsafePointer<CChar>) {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            let typeIdentifier = String(cString: identifier)
+            if let utType = UTType(typeIdentifier) {
+                // UTTypeReference is bridged from UTType
+                c.contentType = utType as UTTypeReference
+            }
+        }
+    }
+
+    /// Get the content type (output format) as UTType identifier
+    @_cdecl("sc_screenshot_configuration_get_content_type")
+    public func getScreenshotConfigurationContentType(_ config: OpaquePointer, _ buffer: UnsafeMutablePointer<CChar>?, _ bufferSize: Int) -> Bool {
+        if #available(macOS 26.0, *) {
+            let c: SCScreenshotConfiguration = unretained(config)
+            // UTTypeReference is type-aliased to UTType
+            let utType = c.contentType as UTType
+            return writeCString(utType.identifier, into: buffer, bufferSize: bufferSize)
+        }
+        return false
+    }
+
+    /// Get the number of supported content types
+    @_cdecl("sc_screenshot_configuration_get_supported_content_types_count")
+    public func getScreenshotConfigurationSupportedContentTypesCount() -> Int {
+        if #available(macOS 26.0, *) {
+            return SCScreenshotConfiguration.supportedContentTypes.count
+        }
+        return 0
+    }
+
+    /// Get a supported content type at index as UTType identifier
+    @_cdecl("sc_screenshot_configuration_get_supported_content_type_at")
+    public func getScreenshotConfigurationSupportedContentTypeAt(_ index: Int, _ buffer: UnsafeMutablePointer<CChar>?, _ bufferSize: Int) -> Bool {
+        if #available(macOS 26.0, *) {
+            let types = SCScreenshotConfiguration.supportedContentTypes
+            guard index >= 0, index < types.count else { return false }
+            return writeCString(types[index].identifier, into: buffer, bufferSize: bufferSize)
+        }
+        return false
+    }
+
+    // MARK: - SCScreenshotOutput (macOS 26.0+)
+
+    @_cdecl("sc_screenshot_output_get_sdr_image")
+    public func getScreenshotOutputSDRImage(_ output: OpaquePointer) -> OpaquePointer? {
+        if #available(macOS 26.0, *) {
+            let o: SCScreenshotOutput = unretained(output)
+            if let image = o.sdrImage {
+                return retain(image)
+            }
+        }
+        return nil
+    }
+
+    @_cdecl("sc_screenshot_output_get_hdr_image")
+    public func getScreenshotOutputHDRImage(_ output: OpaquePointer) -> OpaquePointer? {
+        if #available(macOS 26.0, *) {
+            let o: SCScreenshotOutput = unretained(output)
+            if let image = o.hdrImage {
+                return retain(image)
+            }
+        }
+        return nil
+    }
+
+    @_cdecl("sc_screenshot_output_get_file_url")
+    public func getScreenshotOutputFileURL(_ output: OpaquePointer, _ buffer: UnsafeMutablePointer<CChar>?, _ bufferSize: Int) -> Bool {
+        if #available(macOS 26.0, *) {
+            let o: SCScreenshotOutput = unretained(output)
+            if let url = o.fileURL, let path = (url as NSURL).path {
+                return writeCString(path, into: buffer, bufferSize: bufferSize)
+            }
+        }
+        return false
+    }
+
+    /// Get the output file path as an owned string (caller frees with
+    /// `sc_free_string`). Preferred over the buffer form: paths can be up to
+    /// `PATH_MAX` and the caller should not have to guess.
+    @_cdecl("sc_screenshot_output_get_file_path_owned")
+    public func getScreenshotOutputFilePathOwned(_ output: OpaquePointer) -> UnsafeMutablePointer<CChar>? {
+        if #available(macOS 26.0, *) {
+            let o: SCScreenshotOutput = unretained(output)
+            guard let url = o.fileURL as URL? else { return nil }
+            return url.withUnsafeFileSystemRepresentation { path -> UnsafeMutablePointer<CChar>? in
+                guard let path else { return nil }
+                return strdup(path)
+            }
+        }
+        return nil
+    }
+
+    @_cdecl("sc_screenshot_output_release")
+    public func releaseScreenshotOutput(_ output: OpaquePointer) {
+        release(output)
+    }
+
+    // MARK: - New Screenshot Capture API (macOS 26.0+)
+
+    @available(macOS 26.0, *)
+    private func snapshotScreenshotConfiguration(
+        _ source: SCScreenshotConfiguration
+    ) -> SCScreenshotConfiguration {
+        let copy = SCScreenshotConfiguration()
+        copy.width = source.width
+        copy.height = source.height
+        copy.showsCursor = source.showsCursor
+        copy.sourceRect = source.sourceRect
+        copy.destinationRect = source.destinationRect
+        copy.ignoreShadows = source.ignoreShadows
+        copy.ignoreClipping = source.ignoreClipping
+        copy.includeChildWindows = source.includeChildWindows
+        copy.displayIntent = source.displayIntent
+        copy.dynamicRange = source.dynamicRange
+        copy.contentType = source.contentType
+        copy.fileURL = source.fileURL
+        return copy
+    }
+
+    @_cdecl("sc_screenshot_manager_capture_screenshot")
+    public func captureScreenshotWithConfiguration(
+        _ contentFilter: OpaquePointer,
+        _ config: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        if #available(macOS 26.0, *) {
+            let filter: SCContentFilter = unretained(contentFilter)
+            let configuration = snapshotScreenshotConfiguration(unretained(config))
+
+            Task {
+                do {
+                    let output = try await SCScreenshotManager.captureScreenshot(
+                        contentFilter: filter,
+                        configuration: configuration
+                    )
+                    callback(retain(output), nil, userData)
+                } catch {
+                    let bridgeError = SCBridgeError.screenshotError(error.localizedDescription)
+                    bridgeError.description.withCString { callback(nil, $0, userData) }
+                }
+            }
+        } else {
+            let bridgeError = SCBridgeError.screenshotError("captureScreenshot requires macOS 26.0+")
+            bridgeError.description.withCString { callback(nil, $0, userData) }
+        }
+    }
+
+    @_cdecl("sc_screenshot_manager_capture_screenshot_in_rect")
+    public func captureScreenshotInRectWithConfiguration(
+        _ x: Double,
+        _ y: Double,
+        _ width: Double,
+        _ height: Double,
+        _ config: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        if #available(macOS 26.0, *) {
+            let rect = CGRect(x: x, y: y, width: width, height: height)
+            let configuration = snapshotScreenshotConfiguration(unretained(config))
+
+            Task {
+                do {
+                    let output = try await SCScreenshotManager.captureScreenshot(
+                        rect: rect,
+                        configuration: configuration
+                    )
+                    callback(retain(output), nil, userData)
+                } catch {
+                    let bridgeError = SCBridgeError.screenshotError(error.localizedDescription)
+                    bridgeError.description.withCString { callback(nil, $0, userData) }
+                }
+            }
+        } else {
+            let bridgeError = SCBridgeError.screenshotError("captureScreenshotInRect requires macOS 26.0+")
+            bridgeError.description.withCString { callback(nil, $0, userData) }
+        }
+    }
+#else
+    // Stubs for older compilers
+    @_cdecl("sc_screenshot_configuration_create")
+    public func createScreenshotConfiguration() -> OpaquePointer? { nil }
+
+    @_cdecl("sc_screenshot_configuration_set_width")
+    public func setScreenshotConfigurationWidth(_: OpaquePointer, _: Int) {}
+
+    @_cdecl("sc_screenshot_configuration_set_height")
+    public func setScreenshotConfigurationHeight(_: OpaquePointer, _: Int) {}
+
+    @_cdecl("sc_screenshot_configuration_set_shows_cursor")
+    public func setScreenshotConfigurationShowsCursor(_: OpaquePointer, _: Bool) {}
+
+    @_cdecl("sc_screenshot_configuration_set_source_rect")
+    public func setScreenshotConfigurationSourceRect(_: OpaquePointer, _: Double, _: Double, _: Double, _: Double) {}
+
+    @_cdecl("sc_screenshot_configuration_set_destination_rect")
+    public func setScreenshotConfigurationDestinationRect(_: OpaquePointer, _: Double, _: Double, _: Double, _: Double) {}
+
+    @_cdecl("sc_screenshot_configuration_set_ignore_shadows")
+    public func setScreenshotConfigurationIgnoreShadows(_: OpaquePointer, _: Bool) {}
+
+    @_cdecl("sc_screenshot_configuration_set_ignore_clipping")
+    public func setScreenshotConfigurationIgnoreClipping(_: OpaquePointer, _: Bool) {}
+
+    @_cdecl("sc_screenshot_configuration_set_include_child_windows")
+    public func setScreenshotConfigurationIncludeChildWindows(_: OpaquePointer, _: Bool) {}
+
+    @_cdecl("sc_screenshot_configuration_set_display_intent")
+    public func setScreenshotConfigurationDisplayIntent(_: OpaquePointer, _: Int32) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_set_dynamic_range")
+    public func setScreenshotConfigurationDynamicRange(_: OpaquePointer, _: Int32) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_set_file_url")
+    public func setScreenshotConfigurationFileURL(_: OpaquePointer, _: UnsafePointer<CChar>) {}
+
+    @_cdecl("sc_screenshot_configuration_get_width")
+    public func getScreenshotConfigurationWidth(_: OpaquePointer) -> Int { 0 }
+
+    @_cdecl("sc_screenshot_configuration_get_height")
+    public func getScreenshotConfigurationHeight(_: OpaquePointer) -> Int { 0 }
+
+    @_cdecl("sc_screenshot_configuration_get_shows_cursor")
+    public func getScreenshotConfigurationShowsCursor(_: OpaquePointer) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_get_source_rect")
+    public func getScreenshotConfigurationSourceRect(
+        _: OpaquePointer,
+        _ x: UnsafeMutablePointer<Double>,
+        _ y: UnsafeMutablePointer<Double>,
+        _ width: UnsafeMutablePointer<Double>,
+        _ height: UnsafeMutablePointer<Double>
+    ) {
+        x.pointee = 0
+        y.pointee = 0
+        width.pointee = 0
+        height.pointee = 0
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_destination_rect")
+    public func getScreenshotConfigurationDestinationRect(
+        _: OpaquePointer,
+        _ x: UnsafeMutablePointer<Double>,
+        _ y: UnsafeMutablePointer<Double>,
+        _ width: UnsafeMutablePointer<Double>,
+        _ height: UnsafeMutablePointer<Double>
+    ) {
+        x.pointee = 0
+        y.pointee = 0
+        width.pointee = 0
+        height.pointee = 0
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_ignore_shadows")
+    public func getScreenshotConfigurationIgnoreShadows(_: OpaquePointer) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_get_ignore_clipping")
+    public func getScreenshotConfigurationIgnoreClipping(_: OpaquePointer) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_get_include_child_windows")
+    public func getScreenshotConfigurationIncludeChildWindows(_: OpaquePointer) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_get_display_intent")
+    public func getScreenshotConfigurationDisplayIntent(
+        _: OpaquePointer,
+        _ outIntent: UnsafeMutablePointer<Int32>
+    ) -> Bool {
+        outIntent.pointee = 0
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_dynamic_range")
+    public func getScreenshotConfigurationDynamicRange(
+        _: OpaquePointer,
+        _ outRange: UnsafeMutablePointer<Int32>
+    ) -> Bool {
+        outRange.pointee = 0
+        return false
+    }
+
+    @_cdecl("sc_screenshot_configuration_get_file_path_owned")
+    public func getScreenshotConfigurationFilePathOwned(_: OpaquePointer) -> UnsafeMutablePointer<CChar>? { nil }
+
+    @_cdecl("sc_screenshot_configuration_clear_file_url")
+    public func clearScreenshotConfigurationFileURL(_: OpaquePointer) {}
+
+    @_cdecl("sc_screenshot_output_get_file_path_owned")
+    public func getScreenshotOutputFilePathOwned(_: OpaquePointer) -> UnsafeMutablePointer<CChar>? { nil }
+
+    @_cdecl("sc_screenshot_configuration_release")
+    public func releaseScreenshotConfiguration(_: OpaquePointer) {}
+
+    @_cdecl("sc_screenshot_output_get_sdr_image")
+    public func getScreenshotOutputSDRImage(_: OpaquePointer) -> OpaquePointer? { nil }
+
+    @_cdecl("sc_screenshot_output_get_hdr_image")
+    public func getScreenshotOutputHDRImage(_: OpaquePointer) -> OpaquePointer? { nil }
+
+    @_cdecl("sc_screenshot_output_get_file_url")
+    public func getScreenshotOutputFileURL(_: OpaquePointer, _: UnsafeMutablePointer<CChar>?, _: Int) -> Bool { false }
+
+    @_cdecl("sc_screenshot_output_release")
+    public func releaseScreenshotOutput(_: OpaquePointer) {}
+
+    @_cdecl("sc_screenshot_manager_capture_screenshot")
+    public func captureScreenshotWithConfiguration(
+        _: OpaquePointer,
+        _: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        let bridgeError = SCBridgeError.screenshotError("captureScreenshot requires macOS 26.0+")
+        bridgeError.description.withCString { callback(nil, $0, userData) }
+    }
+
+    @_cdecl("sc_screenshot_manager_capture_screenshot_in_rect")
+    public func captureScreenshotInRectWithConfiguration(
+        _: Double,
+        _: Double,
+        _: Double,
+        _: Double,
+        _: OpaquePointer,
+        _ callback: @escaping @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        _ userData: UnsafeMutableRawPointer?
+    ) {
+        let bridgeError = SCBridgeError.screenshotError("captureScreenshotInRect requires macOS 26.0+")
+        bridgeError.description.withCString { callback(nil, $0, userData) }
+    }
+
+    @_cdecl("sc_screenshot_configuration_set_content_type")
+    public func setScreenshotConfigurationContentType(_: OpaquePointer, _: UnsafePointer<CChar>) {}
+
+    @_cdecl("sc_screenshot_configuration_get_content_type")
+    public func getScreenshotConfigurationContentType(_: OpaquePointer, _: UnsafeMutablePointer<CChar>?, _: Int) -> Bool { false }
+
+    @_cdecl("sc_screenshot_configuration_get_supported_content_types_count")
+    public func getScreenshotConfigurationSupportedContentTypesCount() -> Int { 0 }
+
+    @_cdecl("sc_screenshot_configuration_get_supported_content_type_at")
+    public func getScreenshotConfigurationSupportedContentTypeAt(_: Int, _: UnsafeMutablePointer<CChar>?, _: Int) -> Bool { false }
+#endif

@@ -1,0 +1,632 @@
+//! Stream configuration builder pattern tests
+//!
+//! Comprehensive tests for the `SCStreamConfiguration` builder pattern
+
+use screencapturekit::cg::CGRect;
+use screencapturekit::cm::CMTime;
+use screencapturekit::stream::configuration::{
+    color_matrix, color_space, PixelFormat, SCStreamConfiguration, MAX_QUEUE_DEPTH, MIN_QUEUE_DEPTH,
+};
+
+// MARK: - Builder Pattern Tests
+
+#[test]
+fn test_builder_new() {
+    let config = SCStreamConfiguration::new();
+    // Should have some default width/height
+    let _ = config.width();
+    let _ = config.height();
+}
+
+#[test]
+fn test_builder_with_width() {
+    let config = SCStreamConfiguration::new().with_width(1920);
+    assert_eq!(config.width(), 1920);
+}
+
+#[test]
+fn test_builder_with_height() {
+    let config = SCStreamConfiguration::new().with_height(1080);
+    assert_eq!(config.height(), 1080);
+}
+
+#[test]
+fn test_builder_chaining() {
+    let config = SCStreamConfiguration::new()
+        .with_width(1920)
+        .with_height(1080)
+        .with_pixel_format(PixelFormat::BGRA)
+        .with_shows_cursor(true)
+        .with_captures_audio(false);
+
+    assert_eq!(config.width(), 1920);
+    assert_eq!(config.height(), 1080);
+    assert!(config.shows_cursor());
+}
+
+#[test]
+fn test_builder_with_queue_depth() {
+    let config = SCStreamConfiguration::new().with_queue_depth(8);
+    assert_eq!(config.queue_depth(), 8);
+}
+
+#[test]
+fn test_builder_with_minimum_frame_interval() {
+    let frame_interval = CMTime::new(1, 60); // 60 FPS
+    let config = SCStreamConfiguration::new().with_minimum_frame_interval(&frame_interval);
+
+    let result = config.minimum_frame_interval();
+    if result.is_valid() {
+        assert_eq!(result.value, 1);
+        assert_eq!(result.timescale, 60);
+    }
+}
+
+#[test]
+fn test_builder_with_fps() {
+    let config = SCStreamConfiguration::new().with_fps(60);
+    // FPS is derived from minimum_frame_interval
+    let fps = config.fps();
+    // Note: May be 0 on some macOS versions
+    println!("FPS: {fps}");
+}
+
+#[test]
+fn test_builder_with_scales_to_fit() {
+    let config = SCStreamConfiguration::new().with_scales_to_fit(true);
+    assert!(config.scales_to_fit());
+
+    let config2 = SCStreamConfiguration::new().with_scales_to_fit(false);
+    assert!(!config2.scales_to_fit());
+}
+
+#[test]
+fn test_builder_with_source_rect() {
+    let rect = CGRect::new(0.0, 0.0, 1920.0, 1080.0);
+    let config = SCStreamConfiguration::new().with_source_rect(rect);
+
+    let result = config.source_rect();
+    // Note: source_rect might return default on some macOS versions
+    println!("Source rect: {result:?}");
+}
+
+#[test]
+fn test_builder_with_destination_rect() {
+    let rect = CGRect::new(0.0, 0.0, 960.0, 540.0);
+    let config = SCStreamConfiguration::new().with_destination_rect(rect);
+
+    let result = config.destination_rect();
+    println!("Destination rect: {result:?}");
+}
+
+#[test]
+fn test_builder_with_background_color() {
+    let config = SCStreamConfiguration::new().with_background_color(1.0, 0.0, 0.0);
+    assert_eq!(config.background_color(), Some((1.0, 0.0, 0.0, 1.0)));
+}
+
+#[test]
+fn test_builder_with_background_color_rgba() {
+    let config = SCStreamConfiguration::new().with_background_color_rgba(0.25, 0.5, 0.75, 0.125);
+    assert_eq!(config.background_color(), Some((0.25, 0.5, 0.75, 0.125)));
+}
+
+#[test]
+#[cfg(feature = "macos_14_0")]
+fn test_builder_with_stream_name() {
+    let config = SCStreamConfiguration::new()
+        .with_stream_name(Some("TestStream"))
+        .expect("stream name has no NUL byte");
+    let name = config.stream_name();
+    // Stream name may not be retrievable on all macOS versions
+    println!("Stream name: {name:?}");
+}
+
+#[test]
+fn test_builder_audio_configuration() {
+    let config = SCStreamConfiguration::new()
+        .with_captures_audio(true)
+        .with_sample_rate(48000)
+        .with_channel_count(2);
+
+    assert!(config.captures_audio());
+    // Note: sample_rate and channel_count getters may return defaults
+}
+
+// MARK: - Multiple Format Tests
+
+#[test]
+fn test_all_pixel_formats() {
+    let formats = [
+        PixelFormat::BGRA,
+        PixelFormat::l10r,
+        PixelFormat::YCbCr_420v,
+        PixelFormat::YCbCr_420f,
+    ];
+
+    for format in formats {
+        let config = SCStreamConfiguration::new().with_pixel_format(format);
+        // Just verify no crash
+        let _ = config.width();
+    }
+}
+
+#[test]
+fn test_pixel_format_display() {
+    let format = PixelFormat::BGRA;
+    let display = format!("{format}");
+    assert!(!display.is_empty());
+
+    let format = PixelFormat::YCbCr_420v;
+    let display = format!("{format}");
+    assert!(!display.is_empty());
+}
+
+// MARK: - Edge Cases
+
+#[test]
+fn test_zero_dimensions() {
+    let config = SCStreamConfiguration::new().with_width(0).with_height(0);
+    assert_eq!(config.width(), 0);
+    assert_eq!(config.height(), 0);
+}
+
+#[test]
+fn test_large_dimensions() {
+    let config = SCStreamConfiguration::new()
+        .with_width(7680) // 8K
+        .with_height(4320);
+    assert_eq!(config.width(), 7680);
+    assert_eq!(config.height(), 4320);
+}
+
+#[test]
+fn test_odd_dimensions() {
+    // Non-standard dimensions
+    let config = SCStreamConfiguration::new()
+        .with_width(1921)
+        .with_height(1081);
+    assert_eq!(config.width(), 1921);
+    assert_eq!(config.height(), 1081);
+}
+
+#[test]
+fn test_very_high_fps() {
+    let frame_interval = CMTime::new(1, 240); // 240 FPS
+    let config = SCStreamConfiguration::new().with_minimum_frame_interval(&frame_interval);
+    // Just verify no crash
+    let _ = config.minimum_frame_interval();
+}
+
+#[test]
+fn test_very_low_fps() {
+    let frame_interval = CMTime::new(1, 1); // 1 FPS
+    let config = SCStreamConfiguration::new().with_minimum_frame_interval(&frame_interval);
+    let _ = config.minimum_frame_interval();
+}
+
+// MARK: - Configuration Clone and Equality
+
+#[test]
+fn test_configuration_clone() {
+    let config1 = SCStreamConfiguration::new()
+        .with_width(1920)
+        .with_height(1080);
+
+    let config2 = config1.clone();
+    assert_eq!(config1.width(), config2.width());
+    assert_eq!(config1.height(), config2.height());
+}
+
+#[test]
+fn test_configuration_equality() {
+    let config1 = SCStreamConfiguration::new();
+    let config2 = SCStreamConfiguration::new();
+
+    // Two separately created configs have different pointers, so they're not equal
+    // This tests pointer-based equality
+    assert_ne!(config1, config2);
+
+    // `Clone` deep-copies the underlying mutable SCStreamConfiguration, so a
+    // clone is a distinct object under this type's identity-based equality.
+    let config3 = config1.clone();
+    assert_ne!(config1, config3);
+}
+
+/// `Clone` must hand back an independent `SCStreamConfiguration`, not another
+/// handle on the same mutable Objective-C object: aliasing clones would let
+/// one handle silently reconfigure the others (and race, given `Send`/`Sync`).
+#[test]
+fn test_configuration_clone_is_independent() {
+    let original = SCStreamConfiguration::new()
+        .with_width(1920)
+        .with_height(1080)
+        .with_shows_cursor(true)
+        .with_queue_depth(5);
+
+    let mut copy = original.clone();
+    assert_eq!(copy.width(), 1920);
+    assert_eq!(copy.height(), 1080);
+    assert!(copy.shows_cursor());
+    assert_eq!(copy.queue_depth(), 5);
+
+    copy.set_width(640);
+    copy.set_height(480);
+    copy.set_shows_cursor(false);
+    copy.set_queue_depth(8);
+
+    assert_eq!(original.width(), 1920, "clone must not mutate the original");
+    assert_eq!(original.height(), 1080);
+    assert!(original.shows_cursor());
+    assert_eq!(original.queue_depth(), 5);
+}
+
+/// Side-channel state (background colour / colour space / colour matrix lives
+/// in the Swift bridge's per-configuration table, not on the native object)
+/// has to be carried across the deep copy too.
+#[test]
+fn test_configuration_clone_copies_side_channel_state() {
+    let original = SCStreamConfiguration::new()
+        .with_background_color_rgba(0.25, 0.5, 0.75, 1.0)
+        .with_color_space_name(color_space::SRGB)
+        .expect("color space name has no NUL byte")
+        .with_color_matrix(color_matrix::ITU_R_709_2)
+        .expect("color matrix has no NUL byte");
+
+    let copy = original.clone();
+    assert_ne!(copy, original, "clone must be an independent object");
+    assert_eq!(copy.background_color(), Some((0.25, 0.5, 0.75, 1.0)));
+    assert_eq!(copy.color_space_name().as_deref(), Some(color_space::SRGB));
+    assert_eq!(
+        copy.color_matrix().as_deref(),
+        Some(color_matrix::ITU_R_709_2)
+    );
+}
+
+/// `queueDepth` outside `ScreenCaptureKit`'s documented 3..=8 range is clamped
+/// rather than forwarded, because `SCStream` rejects it at `startCapture`
+/// time with an opaque `SCStreamErrorFailedToStart`.
+#[test]
+fn test_queue_depth_is_clamped_to_supported_range() {
+    let mut config = SCStreamConfiguration::new();
+
+    config.set_queue_depth(0);
+    assert_eq!(config.queue_depth(), MIN_QUEUE_DEPTH);
+
+    config.set_queue_depth(1);
+    assert_eq!(config.queue_depth(), MIN_QUEUE_DEPTH);
+
+    config.set_queue_depth(u32::MAX);
+    assert_eq!(config.queue_depth(), MAX_QUEUE_DEPTH);
+
+    for depth in MIN_QUEUE_DEPTH..=MAX_QUEUE_DEPTH {
+        config.set_queue_depth(depth);
+        assert_eq!(config.queue_depth(), depth);
+    }
+}
+
+/// `set_fps(0)` means "uncapped". The naive `1/0` `CMTime` it used to build was
+/// flagged valid but had a zero timescale, so `CMTimeGetSeconds` divides by
+/// zero; `kCMTimeZero` (`0/1`) is the value `ScreenCaptureKit` documents.
+#[test]
+fn test_set_fps_zero_is_cm_time_zero() {
+    let config = SCStreamConfiguration::new().with_fps(0);
+
+    let interval = config.minimum_frame_interval();
+    assert_eq!(interval.value, 0);
+    assert_eq!(interval.timescale, 1);
+    assert!(interval.is_valid());
+    assert_eq!(config.fps(), 0);
+}
+
+/// Interior NUL bytes cannot cross the C boundary; the fallible setters must
+/// say so instead of silently leaving the previous value in place.
+#[test]
+fn test_interior_nul_strings_are_rejected() {
+    let mut config = SCStreamConfiguration::new()
+        .with_color_matrix(color_matrix::ITU_R_601_4)
+        .expect("color matrix has no NUL byte");
+
+    assert!(config.set_color_matrix("ITU_R\0_709_2").is_err());
+    assert!(config.set_color_space_name("kCGColorSpace\0SRGB").is_err());
+    #[cfg(feature = "macos_14_0")]
+    assert!(matches!(
+        config.set_stream_name(Some("bad\0name")),
+        Err(screencapturekit::error::SCError::InvalidConfiguration(_))
+    ));
+    #[cfg(feature = "macos_15_0")]
+    assert!(matches!(
+        config.set_microphone_capture_device_id("bad\0id"),
+        Err(screencapturekit::error::SCError::InvalidConfiguration(_))
+    ));
+
+    assert_eq!(
+        config.color_matrix().as_deref(),
+        Some(color_matrix::ITU_R_601_4),
+        "a rejected value must not disturb the previous one"
+    );
+
+    assert!(config
+        .set_color_matrix(color_matrix::SMPTE_240M_1995)
+        .is_ok());
+    assert_eq!(
+        config.color_matrix().as_deref(),
+        Some(color_matrix::SMPTE_240M_1995)
+    );
+}
+
+#[test]
+fn test_builders_reject_interior_nul_strings() {
+    assert!(SCStreamConfiguration::new()
+        .with_color_space_name("kCGColorSpace\0SRGB")
+        .is_err());
+    assert!(SCStreamConfiguration::new()
+        .with_color_matrix("ITU_R\0_709_2")
+        .is_err());
+    #[cfg(feature = "macos_14_0")]
+    assert!(SCStreamConfiguration::new()
+        .with_stream_name(Some("bad\0name"))
+        .is_err());
+    #[cfg(feature = "macos_15_0")]
+    assert!(SCStreamConfiguration::new()
+        .with_microphone_capture_device_id("bad\0id")
+        .is_err());
+}
+
+#[test]
+fn test_configuration_hash() {
+    use std::collections::HashSet;
+
+    let config1 = SCStreamConfiguration::new();
+    let config2 = SCStreamConfiguration::new();
+
+    let mut set = HashSet::new();
+    set.insert(config1);
+    set.insert(config2);
+    assert!(!set.is_empty(), "Set should contain configurations");
+
+    // Both should hash to the same value since they're default configs
+    // Note: This depends on the Hash implementation
+}
+
+// MARK: - Mutable vs Builder Pattern Consistency
+
+#[test]
+fn test_mutable_matches_builder() {
+    // Using builder pattern
+    let builder_config = SCStreamConfiguration::new()
+        .with_width(1920)
+        .with_height(1080)
+        .with_shows_cursor(true);
+
+    // Using mutable pattern
+    let mut mutable_config = SCStreamConfiguration::new();
+    mutable_config.set_width(1920);
+    mutable_config.set_height(1080);
+    mutable_config.set_shows_cursor(true);
+
+    assert_eq!(builder_config.width(), mutable_config.width());
+    assert_eq!(builder_config.height(), mutable_config.height());
+    assert_eq!(builder_config.shows_cursor(), mutable_config.shows_cursor());
+}
+
+// MARK: - Feature-Gated Tests
+
+#[test]
+#[cfg(feature = "macos_14_0")]
+fn test_builder_capture_resolution_type() {
+    use screencapturekit::stream::configuration::SCCaptureResolutionType;
+
+    let config = SCStreamConfiguration::new()
+        .with_capture_resolution_type(SCCaptureResolutionType::Best)
+        .expect("macOS 14.0 or later");
+
+    assert_eq!(
+        config.capture_resolution_type(),
+        Ok(SCCaptureResolutionType::Best)
+    );
+}
+
+#[test]
+#[cfg(feature = "macos_14_0")]
+fn test_all_capture_resolution_types() {
+    use screencapturekit::stream::configuration::SCCaptureResolutionType;
+
+    let types = [
+        SCCaptureResolutionType::Automatic,
+        SCCaptureResolutionType::Best,
+        SCCaptureResolutionType::Nominal,
+    ];
+
+    for res_type in types {
+        let config = SCStreamConfiguration::new()
+            .with_capture_resolution_type(res_type)
+            .expect("macOS 14.0 or later");
+        assert_eq!(config.capture_resolution_type(), Ok(res_type));
+    }
+}
+
+#[test]
+#[cfg(feature = "macos_14_2")]
+fn test_builder_advanced_options() {
+    use screencapturekit::stream::configuration::SCPresenterOverlayAlertSetting;
+
+    let config = SCStreamConfiguration::new()
+        .with_ignores_shadows_single_window(true)
+        .and_then(|config| config.with_should_be_opaque(false))
+        .and_then(|config| config.with_includes_child_windows(true))
+        .and_then(|config| {
+            config
+                .with_presenter_overlay_privacy_alert_setting(SCPresenterOverlayAlertSetting::Never)
+        })
+        .expect("macOS 14.2 or later");
+
+    assert!(config.ignores_shadows_single_window());
+    assert!(!config.should_be_opaque());
+    assert!(config.includes_child_windows());
+    assert_eq!(
+        config.presenter_overlay_privacy_alert_setting(),
+        Ok(SCPresenterOverlayAlertSetting::Never)
+    );
+}
+
+#[test]
+#[cfg(feature = "macos_14_0")]
+fn test_builder_ignores_shadow_display_configuration() {
+    let config = SCStreamConfiguration::new()
+        .with_ignores_shadow_display_configuration(true)
+        .expect("macOS 14.0 or later");
+    assert!(config.ignores_shadow_display_configuration());
+}
+
+#[test]
+#[cfg(feature = "macos_15_0")]
+fn test_builder_captures_microphone() {
+    let config = SCStreamConfiguration::new()
+        .with_captures_microphone(true)
+        .expect("macOS 15.0 or later");
+    assert!(config.captures_microphone());
+}
+
+#[test]
+#[cfg(feature = "macos_15_0")]
+fn test_builder_dynamic_range() {
+    use screencapturekit::stream::configuration::SCCaptureDynamicRange;
+
+    let ranges = [
+        SCCaptureDynamicRange::SDR,
+        SCCaptureDynamicRange::HDRLocalDisplay,
+        SCCaptureDynamicRange::HDRCanonicalDisplay,
+    ];
+
+    for range in ranges {
+        let config = SCStreamConfiguration::new()
+            .with_capture_dynamic_range(range)
+            .expect("macOS 15.0 or later");
+        assert_eq!(config.capture_dynamic_range(), Ok(range));
+    }
+}
+
+// MARK: - Audio Configuration Tests
+
+#[test]
+fn test_audio_sample_rates() {
+    let rates = [22050, 44100, 48000, 96000, 192_000];
+
+    for rate in rates {
+        let config = SCStreamConfiguration::new()
+            .with_captures_audio(true)
+            .with_sample_rate(rate);
+        // Just verify no crash
+        let _ = config.captures_audio();
+    }
+}
+
+#[test]
+fn test_audio_channel_counts() {
+    let counts = [1, 2, 6, 8]; // Mono, Stereo, 5.1, 7.1
+
+    for count in counts {
+        let config = SCStreamConfiguration::new()
+            .with_captures_audio(true)
+            .with_channel_count(count);
+        // Just verify no crash
+        let _ = config.captures_audio();
+    }
+}
+
+#[test]
+#[cfg(feature = "macos_14_0")]
+fn test_excludes_current_process_audio() {
+    let config = SCStreamConfiguration::new()
+        .with_captures_audio(true)
+        .with_excludes_current_process_audio(true);
+    let _ = config.excludes_current_process_audio();
+}
+
+// MARK: - Color Configuration Tests
+
+#[test]
+fn test_color_space_name() {
+    let config = SCStreamConfiguration::new()
+        .with_color_space_name("kCGColorSpaceSRGB")
+        .expect("color space name has no NUL byte");
+    assert_eq!(
+        config.color_space_name(),
+        Some("kCGColorSpaceSRGB".to_string())
+    );
+}
+
+#[test]
+fn test_color_matrix() {
+    let config = SCStreamConfiguration::new()
+        .with_color_matrix("kCGColorMatrix709")
+        .expect("color matrix has no NUL byte");
+    assert_eq!(config.color_matrix(), Some("kCGColorMatrix709".to_string()));
+}
+
+// MARK: - Complete Configuration Test
+
+#[test]
+fn test_complete_production_configuration() {
+    // A realistic production configuration
+    let frame_interval = CMTime::new(1, 60);
+
+    let config = SCStreamConfiguration::new()
+        // Video
+        .with_width(1920)
+        .with_height(1080)
+        .with_pixel_format(PixelFormat::BGRA)
+        .with_minimum_frame_interval(&frame_interval)
+        .with_queue_depth(8)
+        .with_shows_cursor(true)
+        .with_scales_to_fit(false)
+        // Audio
+        .with_captures_audio(true)
+        .with_sample_rate(48000)
+        .with_channel_count(2);
+
+    // Verify critical settings
+    assert_eq!(config.width(), 1920);
+    assert_eq!(config.height(), 1080);
+    assert!(config.shows_cursor());
+    assert!(config.captures_audio());
+    assert_eq!(config.queue_depth(), 8);
+}
+
+#[test]
+fn test_streaming_configuration() {
+    // Configuration optimized for streaming
+    let frame_interval = CMTime::new(1, 30);
+
+    let config = SCStreamConfiguration::new()
+        .with_width(1280)
+        .with_height(720)
+        .with_pixel_format(PixelFormat::YCbCr_420v) // Better for encoding
+        .with_minimum_frame_interval(&frame_interval)
+        .with_queue_depth(3) // Lower latency
+        .with_shows_cursor(true)
+        .with_captures_audio(true)
+        .with_sample_rate(44100)
+        .with_channel_count(2);
+
+    assert_eq!(config.width(), 1280);
+    assert_eq!(config.height(), 720);
+}
+
+#[test]
+fn test_screenshot_configuration() {
+    // Configuration optimized for single screenshots
+    let config = SCStreamConfiguration::new()
+        .with_width(3840)
+        .with_height(2160)
+        .with_pixel_format(PixelFormat::BGRA)
+        .with_queue_depth(1)
+        .with_shows_cursor(false)
+        .with_captures_audio(false);
+
+    assert_eq!(config.width(), 3840);
+    assert_eq!(config.height(), 2160);
+    assert!(!config.shows_cursor());
+    assert!(!config.captures_audio());
+}
