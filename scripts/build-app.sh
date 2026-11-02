@@ -91,19 +91,25 @@ url_scheme=hex
 /usr/libexec/PlistBuddy -c "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 $url_scheme" "$bundle/Contents/Info.plist"
 # The helper mirrors a cabled iPhone as a camera; macOS asks on Hex's behalf.
 plutil -replace NSCameraUsageDescription -string "Hex mirrors and records a cabled iPhone's screen for a capture." "$bundle/Contents/Info.plist"
-rm -rf "$icon_output"
-mkdir -p "$icon_output"
-xcrun actool "$root/app/AppIcon.icon" \
-  --compile "$icon_output" \
-  --platform macosx \
-  --minimum-deployment-target 15.0 \
-  --app-icon AppIcon \
-  --standalone-icon-behavior all \
-  --output-partial-info-plist "$icon_info" \
-  --output-format human-readable-text \
-  --warnings \
-  --notices >&2
-cp "$icon_output/AppIcon.icns" "$icon_output/Assets.car" "$bundle/Contents/Resources/"
+if xcrun --find actool >/dev/null 2>&1; then
+  rm -rf "$icon_output"
+  mkdir -p "$icon_output"
+  xcrun actool "$root/app/AppIcon.icon" \
+    --compile "$icon_output" \
+    --platform macosx \
+    --minimum-deployment-target 15.0 \
+    --app-icon AppIcon \
+    --standalone-icon-behavior all \
+    --output-partial-info-plist "$icon_info" \
+    --output-format human-readable-text \
+    --warnings \
+    --notices >&2
+  cp "$icon_output/AppIcon.icns" "$icon_output/Assets.car" "$bundle/Contents/Resources/"
+else
+  # actool ships only with Xcode, not the Command Line Tools. The app runs
+  # without the icon, so an Intel build from CLT can skip it.
+  echo "actool unavailable; building without the app icon" >&2
+fi
 
 sign "$bundle/Contents/Library/HexMicrophone.driver"
 # Hex runs it only to decode the capture's movie, which needs no

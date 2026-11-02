@@ -51,5 +51,10 @@
   <string>Hex uses your microphone for private local dictation and does not store the captured audio.</string>
   <key>SUPublicEDKey</key>
   <string>mIek27lttJe8cIBqVZFhh6reRKjpTx1h9ZY9OKWPtuM=</string>
+  <key>LSEnvironment</key>
+  <dict>
+    <key>RUNE_GPU_BACKEND</key>
+    <string>metal</string>
+  </dict>
 </dict>
 </plist>

@@ -1,3 +1,4 @@
+#if compiler(>=6.2)
 import AVFAudio
 import Foundation
 import Speech
@@ -461,3 +462,40 @@ public func hexAppleSpeechRelease(_ opaque: UnsafeMutableRawPointer?) {
 public func hexAppleSpeechFreeString(_ string: UnsafeMutablePointer<CChar>?) {
     free(string)
 }
+#else
+// SpeechTranscriber and SpeechAnalyzer need the Swift 6.2 SDK that ships with
+// Xcode 26. The standalone Command Line Tools cannot compile them, so Intel
+// builds there report Apple Speech as unavailable instead of failing the build.
+import Foundation
+
+@_cdecl("hex_apple_speech_ready")
+public func hexAppleSpeechReady(_ identifier: UnsafePointer<CChar>?) -> Int32 { 0 }
+
+@_cdecl("hex_apple_speech_prepare")
+public func hexAppleSpeechPrepare(
+    _ identifier: UnsafePointer<CChar>?,
+    _ error: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    error?.pointee = strdup("Apple Speech requires the macOS 26 SDK (Xcode 26 or later).")
+    return nil
+}
+
+@_cdecl("hex_apple_speech_transcribe")
+public func hexAppleSpeechTranscribe(
+    _ opaque: UnsafeMutableRawPointer?,
+    _ samples: UnsafePointer<Float>?,
+    _ count: Int,
+    _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutablePointer<CChar>? {
+    errorOutput?.pointee = strdup("Apple Speech is unavailable in this build.")
+    return nil
+}
+
+@_cdecl("hex_apple_speech_release")
+public func hexAppleSpeechRelease(_ opaque: UnsafeMutableRawPointer?) {}
+
+@_cdecl("hex_apple_speech_free_string")
+public func hexAppleSpeechFreeString(_ string: UnsafeMutablePointer<CChar>?) {
+    free(string)
+}
+#endif
