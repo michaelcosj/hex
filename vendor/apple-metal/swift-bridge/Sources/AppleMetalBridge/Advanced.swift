@@ -1,0 +1,1255 @@
+import Foundation
+import Metal
+
+@_cdecl("ametal_device_name")
+public func ametal_device_name(_ handle: UnsafeMutableRawPointer?) -> UnsafeMutablePointer<CChar>? {
+    guard let device: MTLDevice = am_borrow(handle) else { return nil }
+    return am_copy_string(device.name)
+}
+
+@_cdecl("ametal_device_registry_id")
+public func ametal_device_registry_id(_ handle: UnsafeMutableRawPointer?) -> UInt64 {
+    guard let device: MTLDevice = am_borrow(handle) else { return 0 }
+    return device.registryID
+}
+
+@_cdecl("ametal_device_supports_dynamic_libraries")
+public func ametal_device_supports_dynamic_libraries(_ handle: UnsafeMutableRawPointer?) -> Bool {
+    guard #available(macOS 11.0, *),
+          let device: MTLDevice = am_borrow(handle)
+    else { return false }
+    return device.supportsDynamicLibraries
+}
+
+@_cdecl("ametal_device_supports_render_dynamic_libraries")
+public func ametal_device_supports_render_dynamic_libraries(_ handle: UnsafeMutableRawPointer?) -> Bool {
+    guard #available(macOS 12.0, *),
+          let device: MTLDevice = am_borrow(handle)
+    else { return false }
+    return device.supportsRenderDynamicLibraries
+}
+
+@_cdecl("ametal_device_supports_raytracing")
+public func ametal_device_supports_raytracing(_ handle: UnsafeMutableRawPointer?) -> Bool {
+    guard #available(macOS 11.0, *),
+          let device: MTLDevice = am_borrow(handle)
+    else { return false }
+    return device.supportsRaytracing
+}
+
+@_cdecl("ametal_device_supports_function_pointers")
+public func ametal_device_supports_function_pointers(_ handle: UnsafeMutableRawPointer?) -> Bool {
+    guard let device: MTLDevice = am_borrow(handle) else { return false }
+    return device.supportsFunctionPointers
+}
+
+@_cdecl("ametal_device_supports_counter_sampling")
+public func ametal_device_supports_counter_sampling(
+    _ handle: UnsafeMutableRawPointer?,
+    _ samplingPoint: Int
+) -> Bool {
+    guard let device: MTLDevice = am_borrow(handle),
+          let rawPoint = UInt(exactly: samplingPoint),
+          rawPoint <= MTLCounterSamplingPoint.atBlitBoundary.rawValue,
+          let point = MTLCounterSamplingPoint(rawValue: rawPoint)
+    else { return false }
+    return device.supportsCounterSampling(point)
+}
+
+@_cdecl("ametal_device_counter_set_count")
+public func ametal_device_counter_set_count(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard #available(macOS 10.15, *),
+          let device: MTLDevice = am_borrow(handle),
+          let counterSets = device.counterSets
+    else { return 0 }
+    return counterSets.count
+}
+
+@_cdecl("ametal_device_counter_set_name_at")
+public func ametal_device_counter_set_name_at(
+    _ handle: UnsafeMutableRawPointer?,
+    _ index: Int
+) -> UnsafeMutablePointer<CChar>? {
+    guard #available(macOS 10.15, *),
+          let device: MTLDevice = am_borrow(handle),
+          let counterSets = device.counterSets,
+          index >= 0,
+          index < counterSets.count
+    else { return nil }
+    return am_copy_string(counterSets[index].name)
+}
+
+@_cdecl("ametal_device_new_command_queue_with_max_command_buffer_count")
+public func ametal_device_new_command_queue_with_max_command_buffer_count(
+    _ handle: UnsafeMutableRawPointer?,
+    _ maxCommandBufferCount: Int
+) -> UnsafeMutableRawPointer? {
+    guard maxCommandBufferCount > 0,
+          let device: MTLDevice = am_borrow(handle),
+          let queue = device.makeCommandQueue(maxCommandBufferCount: maxCommandBufferCount)
+    else { return nil }
+    return am_retain(queue as AnyObject)
+}
+
+@_cdecl("ametal_device_new_command_queue_with_log_state")
+public func ametal_device_new_command_queue_with_log_state(
+    _ handle: UnsafeMutableRawPointer?,
+    _ maxCommandBufferCount: Int,
+    _ logStateHandle: UnsafeMutableRawPointer?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 15.0, *),
+          let device: MTLDevice = am_borrow(handle),
+          let logState: MTLLogState = am_borrow(logStateHandle)
+    else { return nil }
+
+    let descriptor = MTLCommandQueueDescriptor()
+    descriptor.maxCommandBufferCount = maxCommandBufferCount
+    descriptor.logState = logState
+    guard let queue = device.makeCommandQueue(descriptor: descriptor) else {
+        return nil
+    }
+    return am_retain(queue as AnyObject)
+}
+
+@_cdecl("ametal_device_new_heap")
+public func ametal_device_new_heap(
+    _ handle: UnsafeMutableRawPointer?,
+    _ size: Int,
+    _ storageMode: Int
+) -> UnsafeMutableRawPointer? {
+    guard size > 0,
+          let device: MTLDevice = am_borrow(handle),
+          let rawStorage = UInt(exactly: storageMode),
+          let storage = MTLStorageMode(rawValue: rawStorage),
+          storage == .shared || storage == .managed || storage == .private
+    else { return nil }
+    let descriptor = MTLHeapDescriptor()
+    descriptor.size = size
+    descriptor.storageMode = storage
+    guard let heap = device.makeHeap(descriptor: descriptor) else { return nil }
+    return am_retain(heap as AnyObject)
+}
+
+@_cdecl("ametal_device_new_fence")
+public func ametal_device_new_fence(_ handle: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let device: MTLDevice = am_borrow(handle),
+          let fence = device.makeFence()
+    else { return nil }
+    return am_retain(fence as AnyObject)
+}
+
+@_cdecl("ametal_device_new_shared_event")
+public func ametal_device_new_shared_event(_ handle: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let device: MTLDevice = am_borrow(handle),
+          let event = device.makeSharedEvent()
+    else { return nil }
+    return am_retain(event as AnyObject)
+}
+
+@_cdecl("ametal_device_new_dynamic_library_with_source")
+public func ametal_device_new_dynamic_library_with_source(
+    _ handle: UnsafeMutableRawPointer?,
+    _ source: UnsafePointer<CChar>?,
+    _ installName: UnsafePointer<CChar>?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 11.0, *),
+          let device: MTLDevice = am_borrow(handle),
+          let source,
+          let installName
+    else { return nil }
+
+    let options = MTLCompileOptions()
+    options.libraryType = .dynamic
+    options.installName = String(cString: installName)
+
+    do {
+        let library = try device.makeLibrary(source: String(cString: source), options: options)
+        let dynamicLibrary = try device.makeDynamicLibrary(library: library)
+        return am_retain(dynamicLibrary as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+}
+
+@_cdecl("ametal_device_new_dynamic_library_with_url")
+public func ametal_device_new_dynamic_library_with_url(
+    _ handle: UnsafeMutableRawPointer?,
+    _ path: UnsafePointer<CChar>?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 11.0, *),
+          let device: MTLDevice = am_borrow(handle),
+          let url = am_url(from: path)
+    else { return nil }
+
+    do {
+        let dynamicLibrary = try device.makeDynamicLibrary(url: url)
+        return am_retain(dynamicLibrary as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+}
+
+@_cdecl("ametal_device_new_binary_archive")
+public func ametal_device_new_binary_archive(
+    _ handle: UnsafeMutableRawPointer?,
+    _ path: UnsafePointer<CChar>?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 11.0, *),
+          let device: MTLDevice = am_borrow(handle)
+    else { return nil }
+
+    let descriptor = MTLBinaryArchiveDescriptor()
+    descriptor.url = am_url(from: path)
+
+    do {
+        let archive = try device.makeBinaryArchive(descriptor: descriptor)
+        return am_retain(archive as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+}
+
+@_cdecl("ametal_device_new_indirect_command_buffer")
+public func ametal_device_new_indirect_command_buffer(
+    _ handle: UnsafeMutableRawPointer?,
+    _ commandTypes: UInt,
+    _ maxCommandCount: Int,
+    _ maxVertexBufferBindCount: Int,
+    _ maxFragmentBufferBindCount: Int,
+    _ maxKernelBufferBindCount: Int,
+    _ options: UInt
+) -> UnsafeMutableRawPointer? {
+    guard maxCommandCount > 0,
+          maxVertexBufferBindCount >= 0,
+          maxFragmentBufferBindCount >= 0,
+          maxKernelBufferBindCount >= 0,
+          let device: MTLDevice = am_borrow(handle)
+    else { return nil }
+
+    let descriptor = MTLIndirectCommandBufferDescriptor()
+    descriptor.commandTypes = MTLIndirectCommandType(rawValue: commandTypes)
+    descriptor.inheritBuffers = false
+    descriptor.inheritPipelineState = false
+    descriptor.maxVertexBufferBindCount = maxVertexBufferBindCount
+    descriptor.maxFragmentBufferBindCount = maxFragmentBufferBindCount
+    if #available(macOS 11.0, *) {
+        descriptor.maxKernelBufferBindCount = maxKernelBufferBindCount
+    }
+
+    guard let buffer = device.makeIndirectCommandBuffer(
+        descriptor: descriptor,
+        maxCommandCount: maxCommandCount,
+        options: MTLResourceOptions(rawValue: options)
+    ) else {
+        return nil
+    }
+    return am_retain(buffer as AnyObject)
+}
+
+@_cdecl("ametal_device_new_acceleration_structure_with_size")
+public func ametal_device_new_acceleration_structure_with_size(
+    _ handle: UnsafeMutableRawPointer?,
+    _ size: Int
+) -> UnsafeMutableRawPointer? {
+    guard size > 0,
+          let device: MTLDevice = am_borrow(handle),
+          device.supportsRaytracing,
+          let accelerationStructure = device.makeAccelerationStructure(size: size)
+    else { return nil }
+    return am_retain(accelerationStructure as AnyObject)
+}
+
+@_cdecl("ametal_device_new_counter_sample_buffer")
+public func ametal_device_new_counter_sample_buffer(
+    _ handle: UnsafeMutableRawPointer?,
+    _ counterSetName: UnsafePointer<CChar>?,
+    _ sampleCount: Int,
+    _ storageMode: Int,
+    _ label: UnsafePointer<CChar>?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 10.15, *),
+          let device: MTLDevice = am_borrow(handle),
+          let counterSetName
+    else { return nil }
+
+    guard sampleCount > 0,
+          let rawStorage = UInt(exactly: storageMode),
+          let storage = MTLStorageMode(rawValue: rawStorage),
+          storage == .shared || storage == .managed || storage == .private
+    else {
+        am_store_error_message(outErrorMessage, "invalid counter sample count or storage mode")
+        return nil
+    }
+    let name = String(cString: counterSetName)
+    let counterSets = device.counterSets ?? []
+    guard let counterSet = counterSets.first(where: { $0.name == name }) else {
+        am_store_error_message(outErrorMessage, "Unknown MTLCounterSet '\(name)'")
+        return nil
+    }
+
+    let descriptor = MTLCounterSampleBufferDescriptor()
+    descriptor.counterSet = counterSet
+    descriptor.sampleCount = sampleCount
+    descriptor.storageMode = storage
+    if let label {
+        descriptor.label = String(cString: label)
+    }
+
+    do {
+        let sampleBuffer = try device.makeCounterSampleBuffer(descriptor: descriptor)
+        return am_retain(sampleBuffer as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+}
+
+@_cdecl("ametal_device_new_log_state")
+public func ametal_device_new_log_state(
+    _ handle: UnsafeMutableRawPointer?,
+    _ level: UInt,
+    _ bufferSize: Int,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 15.0, *) else {
+        am_store_error_message(outErrorMessage, "MTLLogState requires macOS 15.0 or later")
+        return nil
+    }
+    guard let device: MTLDevice = am_borrow(handle) else { return nil }
+
+    guard bufferSize >= 0,
+          let rawLevel = Int(exactly: level),
+          let logLevel = MTLLogLevel(rawValue: rawLevel),
+          (MTLLogLevel.undefined.rawValue...MTLLogLevel.fault.rawValue).contains(rawLevel)
+    else {
+        am_store_error_message(outErrorMessage, "invalid log level or buffer size")
+        return nil
+    }
+    let descriptor = MTLLogStateDescriptor()
+    descriptor.level = logLevel
+    descriptor.bufferSize = bufferSize
+
+    do {
+        let logState = try device.makeLogState(descriptor: descriptor)
+        return am_retain(logState as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+}
+
+@_cdecl("ametal_device_new_residency_set")
+public func ametal_device_new_residency_set(
+    _ handle: UnsafeMutableRawPointer?,
+    _ label: UnsafePointer<CChar>?,
+    _ initialCapacity: Int,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 15.0, *) else {
+        am_store_error_message(outErrorMessage, "MTLResidencySet requires macOS 15.0 or later")
+        return nil
+    }
+    guard let device: MTLDevice = am_borrow(handle) else { return nil }
+
+    let descriptor = MTLResidencySetDescriptor()
+    descriptor.initialCapacity = initialCapacity
+    if let label {
+        descriptor.label = String(cString: label)
+    }
+
+    do {
+        let residencySet = try device.makeResidencySet(descriptor: descriptor)
+        return am_retain(residencySet as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+}
+
+@_cdecl("ametal_command_queue_add_residency_set")
+public func ametal_command_queue_add_residency_set(
+    _ handle: UnsafeMutableRawPointer?,
+    _ residencySetHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let queue: MTLCommandQueue = am_borrow(handle),
+          let residencySet: MTLResidencySet = am_borrow(residencySetHandle)
+    else { return }
+    queue.addResidencySet(residencySet)
+}
+
+@_cdecl("ametal_command_queue_remove_residency_set")
+public func ametal_command_queue_remove_residency_set(
+    _ handle: UnsafeMutableRawPointer?,
+    _ residencySetHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let queue: MTLCommandQueue = am_borrow(handle),
+          let residencySet: MTLResidencySet = am_borrow(residencySetHandle)
+    else { return }
+    queue.removeResidencySet(residencySet)
+}
+
+@_cdecl("ametal_buffer_did_modify_range")
+public func ametal_buffer_did_modify_range(
+    _ handle: UnsafeMutableRawPointer?,
+    _ location: Int,
+    _ length: Int
+) {
+    let (end, overflow) = location.addingReportingOverflow(length)
+    guard location >= 0,
+          length >= 0,
+          !overflow,
+          let buffer: MTLBuffer = am_borrow(handle),
+          end <= buffer.length
+    else { return }
+    buffer.didModifyRange(location..<end)
+}
+
+@_cdecl("ametal_buffer_minimum_linear_texture_alignment")
+public func ametal_buffer_minimum_linear_texture_alignment(
+    _ handle: UnsafeMutableRawPointer?,
+    _ pixelFormat: Int
+) -> Int {
+    guard let buffer: MTLBuffer = am_borrow(handle),
+          let rawFormat = UInt(exactly: pixelFormat),
+          let format = MTLPixelFormat(rawValue: rawFormat),
+          format != .invalid
+    else { return 0 }
+    return buffer.device.minimumLinearTextureAlignment(for: format)
+}
+
+@_cdecl("ametal_buffer_new_texture_view_2d")
+public func ametal_buffer_new_texture_view_2d(
+    _ handle: UnsafeMutableRawPointer?,
+    _ pixelFormat: Int,
+    _ width: Int,
+    _ height: Int,
+    _ bytesPerRow: Int,
+    _ offset: Int,
+    _ bytesPerPixel: Int
+) -> UnsafeMutableRawPointer? {
+    guard let buffer: MTLBuffer = am_borrow(handle),
+          width > 0,
+          height > 0,
+          offset >= 0,
+          bytesPerPixel > 0,
+          let rawFormat = UInt(exactly: pixelFormat),
+          let format = MTLPixelFormat(rawValue: rawFormat),
+          format != .invalid,
+          buffer.storageMode == .shared || buffer.storageMode == .managed
+              || buffer.storageMode == .private
+    else { return nil }
+    let alignment = buffer.device.minimumLinearTextureAlignment(for: format)
+    let (minimumRowBytes, rowOverflow) = width.multipliedReportingOverflow(by: bytesPerPixel)
+    let (span, spanOverflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+    let (end, endOverflow) = offset.addingReportingOverflow(span)
+    guard alignment > 0,
+          !rowOverflow,
+          !spanOverflow,
+          !endOverflow,
+          bytesPerRow >= minimumRowBytes,
+          bytesPerRow.isMultiple(of: bytesPerPixel),
+          bytesPerRow.isMultiple(of: alignment),
+          offset.isMultiple(of: alignment),
+          end <= buffer.length
+    else { return nil }
+    let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+        pixelFormat: format,
+        width: width,
+        height: height,
+        mipmapped: false
+    )
+    descriptor.usage = [.shaderRead, .shaderWrite]
+    descriptor.storageMode = buffer.storageMode
+    descriptor.cpuCacheMode = buffer.cpuCacheMode
+    descriptor.hazardTrackingMode = buffer.hazardTrackingMode
+    guard let texture = buffer.makeTexture(descriptor: descriptor, offset: offset, bytesPerRow: bytesPerRow) else {
+        return nil
+    }
+    return am_retain(texture as AnyObject)
+}
+
+@_cdecl("ametal_texture_depth")
+public func ametal_texture_depth(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let texture: MTLTexture = am_borrow(handle) else { return 0 }
+    return texture.depth
+}
+
+@_cdecl("ametal_texture_mipmap_level_count")
+public func ametal_texture_mipmap_level_count(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let texture: MTLTexture = am_borrow(handle) else { return 0 }
+    return texture.mipmapLevelCount
+}
+
+@_cdecl("ametal_texture_array_length")
+public func ametal_texture_array_length(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let texture: MTLTexture = am_borrow(handle) else { return 0 }
+    return texture.arrayLength
+}
+
+@_cdecl("ametal_texture_sample_count")
+public func ametal_texture_sample_count(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let texture: MTLTexture = am_borrow(handle) else { return 0 }
+    return texture.sampleCount
+}
+
+@_cdecl("ametal_texture_usage")
+public func ametal_texture_usage(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let texture: MTLTexture = am_borrow(handle) else { return 0 }
+    return Int(bitPattern: texture.usage.rawValue)
+}
+
+@_cdecl("ametal_texture_storage_mode")
+public func ametal_texture_storage_mode(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let texture: MTLTexture = am_borrow(handle) else { return 0 }
+    return Int(bitPattern: texture.storageMode.rawValue)
+}
+
+private func amTextureTransferLengths(
+    _ texture: MTLTexture,
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+    mipmapLevel: Int,
+    slice: Int,
+    bytesPerRow: Int,
+    bytesPerPixel: Int
+) -> (Int, Int)? {
+    let sliceCount: Int
+    switch texture.textureType.rawValue {
+    case 2:
+        sliceCount = 1
+    case 3:
+        sliceCount = max(1, texture.arrayLength)
+    case 5:
+        sliceCount = 6
+    case 6:
+        let (count, overflow) = max(1, texture.arrayLength).multipliedReportingOverflow(by: 6)
+        guard !overflow else { return nil }
+        sliceCount = count
+    default:
+        return nil
+    }
+    guard x >= 0,
+          y >= 0,
+          width > 0,
+          height > 0,
+          mipmapLevel >= 0,
+          mipmapLevel < texture.mipmapLevelCount,
+          slice >= 0,
+          slice < sliceCount,
+          bytesPerRow >= 0,
+          bytesPerPixel > 0,
+          texture.depth == 1,
+          texture.storageMode == .shared || texture.storageMode == .managed
+    else { return nil }
+
+    let mipWidth = max(1, texture.width >> mipmapLevel)
+    let mipHeight = max(1, texture.height >> mipmapLevel)
+    let (endX, overflowX) = x.addingReportingOverflow(width)
+    let (endY, overflowY) = y.addingReportingOverflow(height)
+    let (minimumRowBytes, overflowRow) = width.multipliedReportingOverflow(by: bytesPerPixel)
+    guard !overflowX,
+          !overflowY,
+          !overflowRow,
+          endX <= mipWidth,
+          endY <= mipHeight,
+          bytesPerRow >= minimumRowBytes,
+          bytesPerRow.isMultiple(of: bytesPerPixel)
+    else { return nil }
+    let (precedingRows, overflowPrecedingRows) = bytesPerRow.multipliedReportingOverflow(
+        by: height - 1
+    )
+    let (requiredSpan, overflowRequiredSpan) = precedingRows.addingReportingOverflow(
+        minimumRowBytes
+    )
+    let (bytesPerImage, overflowBytesPerImage) = bytesPerRow.multipliedReportingOverflow(
+        by: height
+    )
+    guard !overflowPrecedingRows,
+          !overflowRequiredSpan,
+          !overflowBytesPerImage
+    else { return nil }
+    return (requiredSpan, bytesPerImage)
+}
+
+@_cdecl("ametal_texture_replace_region_2d")
+public func ametal_texture_replace_region_2d(
+    _ handle: UnsafeMutableRawPointer?,
+    _ x: Int,
+    _ y: Int,
+    _ width: Int,
+    _ height: Int,
+    _ mipmapLevel: Int,
+    _ slice: Int,
+    _ bytes: UnsafePointer<UInt8>?,
+    _ bytesLen: Int,
+    _ bytesPerRow: Int,
+    _ bytesPerPixel: Int
+) -> Bool {
+    guard let texture: MTLTexture = am_borrow(handle),
+          let bytes,
+          bytesLen >= 0,
+          let lengths = amTextureTransferLengths(
+              texture,
+              x: x,
+              y: y,
+              width: width,
+              height: height,
+              mipmapLevel: mipmapLevel,
+              slice: slice,
+              bytesPerRow: bytesPerRow,
+              bytesPerPixel: bytesPerPixel
+          ),
+          bytesLen >= lengths.0
+    else { return false }
+    let region = MTLRegionMake2D(x, y, width, height)
+    texture.replace(
+        region: region,
+        mipmapLevel: mipmapLevel,
+        slice: slice,
+        withBytes: bytes,
+        bytesPerRow: bytesPerRow,
+        bytesPerImage: lengths.1
+    )
+    return true
+}
+
+@_cdecl("ametal_texture_get_bytes_2d")
+public func ametal_texture_get_bytes_2d(
+    _ handle: UnsafeMutableRawPointer?,
+    _ outBytes: UnsafeMutablePointer<UInt8>?,
+    _ outLen: Int,
+    _ bytesPerRow: Int,
+    _ x: Int,
+    _ y: Int,
+    _ width: Int,
+    _ height: Int,
+    _ mipmapLevel: Int,
+    _ slice: Int,
+    _ bytesPerPixel: Int
+) -> Bool {
+    guard let texture: MTLTexture = am_borrow(handle),
+          let outBytes,
+          outLen >= 0,
+          let lengths = amTextureTransferLengths(
+              texture,
+              x: x,
+              y: y,
+              width: width,
+              height: height,
+              mipmapLevel: mipmapLevel,
+              slice: slice,
+              bytesPerRow: bytesPerRow,
+              bytesPerPixel: bytesPerPixel
+          ),
+          outLen >= lengths.0
+    else { return false }
+    let region = MTLRegionMake2D(x, y, width, height)
+    texture.getBytes(
+        outBytes,
+        bytesPerRow: bytesPerRow,
+        bytesPerImage: lengths.1,
+        from: region,
+        mipmapLevel: mipmapLevel,
+        slice: slice
+    )
+    return true
+}
+
+@_cdecl("ametal_texture_new_view")
+public func ametal_texture_new_view(
+    _ handle: UnsafeMutableRawPointer?,
+    _ pixelFormat: Int
+) -> UnsafeMutableRawPointer? {
+    guard let texture: MTLTexture = am_borrow(handle),
+          let rawFormat = UInt(exactly: pixelFormat),
+          let format = MTLPixelFormat(rawValue: rawFormat),
+          format != .invalid,
+          let view = texture.makeTextureView(pixelFormat: format)
+    else { return nil }
+    return am_retain(view as AnyObject)
+}
+
+@_cdecl("ametal_compute_pipeline_state_thread_execution_width")
+public func ametal_compute_pipeline_state_thread_execution_width(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let pipeline: MTLComputePipelineState = am_borrow(handle) else { return 0 }
+    return pipeline.threadExecutionWidth
+}
+
+@_cdecl("ametal_compute_pipeline_state_max_total_threads_per_threadgroup")
+public func ametal_compute_pipeline_state_max_total_threads_per_threadgroup(
+    _ handle: UnsafeMutableRawPointer?
+) -> Int {
+    guard let pipeline: MTLComputePipelineState = am_borrow(handle) else { return 0 }
+    return pipeline.maxTotalThreadsPerThreadgroup
+}
+
+@_cdecl("ametal_compute_pipeline_state_new_visible_function_table")
+public func ametal_compute_pipeline_state_new_visible_function_table(
+    _ handle: UnsafeMutableRawPointer?,
+    _ functionCount: Int
+) -> UnsafeMutableRawPointer? {
+    guard functionCount >= 0,
+          let pipeline: MTLComputePipelineState = am_borrow(handle),
+          pipeline.device.supportsFunctionPointers
+    else { return nil }
+    let descriptor = MTLVisibleFunctionTableDescriptor()
+    descriptor.functionCount = functionCount
+    guard let table = pipeline.makeVisibleFunctionTable(descriptor: descriptor) else { return nil }
+    return am_retain(table as AnyObject)
+}
+
+@_cdecl("ametal_compute_pipeline_state_new_intersection_function_table")
+public func ametal_compute_pipeline_state_new_intersection_function_table(
+    _ handle: UnsafeMutableRawPointer?,
+    _ functionCount: Int
+) -> UnsafeMutableRawPointer? {
+    guard functionCount >= 0,
+          let pipeline: MTLComputePipelineState = am_borrow(handle),
+          pipeline.device.supportsRaytracing
+    else { return nil }
+    let descriptor = MTLIntersectionFunctionTableDescriptor()
+    descriptor.functionCount = functionCount
+    guard let table = pipeline.makeIntersectionFunctionTable(descriptor: descriptor) else { return nil }
+    return am_retain(table as AnyObject)
+}
+
+@_cdecl("ametal_function_new_argument_encoder")
+public func ametal_function_new_argument_encoder(
+    _ handle: UnsafeMutableRawPointer?,
+    _ bufferIndex: Int
+) -> UnsafeMutableRawPointer? {
+    guard bufferIndex >= 0,
+          let function: MTLFunction = am_borrow(handle)
+    else { return nil }
+    let encoder = function.makeArgumentEncoder(bufferIndex: bufferIndex)
+    amRegisterArgumentEncoder(encoder, layout: nil)
+    return am_retain(encoder as AnyObject)
+}
+
+@_cdecl("ametal_heap_size")
+public func ametal_heap_size(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let heap: MTLHeap = am_borrow(handle) else { return 0 }
+    return heap.size
+}
+
+@_cdecl("ametal_heap_used_size")
+public func ametal_heap_used_size(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let heap: MTLHeap = am_borrow(handle) else { return 0 }
+    return heap.usedSize
+}
+
+@_cdecl("ametal_heap_current_allocated_size")
+public func ametal_heap_current_allocated_size(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let heap: MTLHeap = am_borrow(handle) else { return 0 }
+    return heap.currentAllocatedSize
+}
+
+@_cdecl("ametal_heap_max_available_size")
+public func ametal_heap_max_available_size(_ handle: UnsafeMutableRawPointer?, _ alignment: Int) -> Int {
+    guard alignment == 0 || (alignment > 0 && alignment.nonzeroBitCount == 1),
+          let heap: MTLHeap = am_borrow(handle)
+    else { return 0 }
+    return heap.maxAvailableSize(alignment: alignment)
+}
+
+@_cdecl("ametal_heap_new_buffer")
+public func ametal_heap_new_buffer(
+    _ handle: UnsafeMutableRawPointer?,
+    _ length: Int,
+    _ options: UInt
+) -> UnsafeMutableRawPointer? {
+    let resourceOptions = MTLResourceOptions(rawValue: options)
+    guard length > 0,
+          let heap: MTLHeap = am_borrow(handle),
+          (options & 0xF0) >> 4 == heap.storageMode.rawValue,
+          options & 0xF == heap.cpuCacheMode.rawValue,
+          let buffer = heap.makeBuffer(length: length, options: resourceOptions)
+    else { return nil }
+    return am_retain(buffer as AnyObject)
+}
+
+@_cdecl("ametal_heap_new_texture")
+public func ametal_heap_new_texture(
+    _ handle: UnsafeMutableRawPointer?,
+    _ textureType: Int,
+    _ pixelFormat: Int,
+    _ width: Int,
+    _ height: Int,
+    _ depth: Int,
+    _ mipmapped: Bool,
+    _ arrayLength: Int,
+    _ sampleCount: Int,
+    _ usage: Int,
+    _ storageMode: Int
+) -> UnsafeMutableRawPointer? {
+    guard let heap: MTLHeap = am_borrow(handle),
+          let descriptor = amTextureDescriptor(
+              textureType: textureType,
+              pixelFormat: pixelFormat,
+              width: width,
+              height: height,
+              depth: depth,
+              mipmapped: mipmapped,
+              arrayLength: arrayLength,
+              sampleCount: sampleCount,
+              usage: usage,
+              storageMode: storageMode
+          ),
+          descriptor.storageMode == heap.storageMode || descriptor.storageMode == .memoryless,
+          descriptor.cpuCacheMode == heap.cpuCacheMode,
+          amDeviceSupportsTexture(heap.device, descriptor),
+          let texture = heap.makeTexture(descriptor: descriptor)
+    else { return nil }
+    return am_retain(texture as AnyObject)
+}
+
+@_cdecl("ametal_heap_new_acceleration_structure_with_size")
+public func ametal_heap_new_acceleration_structure_with_size(
+    _ handle: UnsafeMutableRawPointer?,
+    _ size: Int
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 13.0, *),
+          size > 0,
+          let heap: MTLHeap = am_borrow(handle),
+          heap.storageMode == .private,
+          heap.device.supportsRaytracing,
+          let accelerationStructure = heap.makeAccelerationStructure(size: size)
+    else { return nil }
+    return am_retain(accelerationStructure as AnyObject)
+}
+
+@_cdecl("ametal_heap_set_purgeable_state")
+public func ametal_heap_set_purgeable_state(_ handle: UnsafeMutableRawPointer?, _ state: UInt) -> UInt {
+    guard (1...4).contains(state),
+          let heap: MTLHeap = am_borrow(handle),
+          let purgeableState = MTLPurgeableState(rawValue: state)
+    else { return 0 }
+    return heap.setPurgeableState(purgeableState).rawValue
+}
+
+@_cdecl("ametal_event_signaled_value")
+public func ametal_event_signaled_value(_ handle: UnsafeMutableRawPointer?) -> UInt64 {
+    guard let event: MTLSharedEvent = am_borrow(handle) else { return 0 }
+    return event.signaledValue
+}
+
+@_cdecl("ametal_event_set_signaled_value")
+public func ametal_event_set_signaled_value(_ handle: UnsafeMutableRawPointer?, _ value: UInt64) {
+    guard let event: MTLSharedEvent = am_borrow(handle) else { return }
+    event.signaledValue = value
+}
+
+@_cdecl("ametal_event_wait_until_signaled_value")
+public func ametal_event_wait_until_signaled_value(
+    _ handle: UnsafeMutableRawPointer?,
+    _ value: UInt64,
+    _ timeoutMs: UInt64
+) -> Int {
+    guard #available(macOS 12.0, *) else { return -1 }
+    guard let event: MTLSharedEvent = am_borrow(handle) else { return 0 }
+    return event.wait(untilSignaledValue: value, timeoutMS: timeoutMs) ? 1 : 0
+}
+
+@_cdecl("ametal_shared_event_notify_listener")
+public func ametal_shared_event_notify_listener(
+    _ handle: UnsafeMutableRawPointer?,
+    _ listenerHandle: UnsafeMutableRawPointer?,
+    _ value: UInt64,
+    _ context: UnsafeMutableRawPointer?,
+    _ callback: (@convention(c) (UnsafeMutableRawPointer?, UInt64) -> Void)?,
+    _ release: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+) -> Bool {
+    guard let owner = AMCallbackContextOwner(context, release) else { return false }
+    guard let callback,
+          let event: MTLSharedEvent = am_borrow(handle),
+          let listener: MTLSharedEventListener = am_borrow(listenerHandle)
+    else { return false }
+    event.notify(listener, atValue: value) { _, signaledValue in
+        callback(owner.context, signaledValue)
+    }
+    return true
+}
+
+@_cdecl("ametal_dynamic_library_install_name")
+public func ametal_dynamic_library_install_name(_ handle: UnsafeMutableRawPointer?) -> UnsafeMutablePointer<CChar>? {
+    guard #available(macOS 11.0, *),
+          let dynamicLibrary: MTLDynamicLibrary = am_borrow(handle)
+    else { return nil }
+    return am_copy_string(dynamicLibrary.installName)
+}
+
+@_cdecl("ametal_dynamic_library_serialize_to_url")
+public func ametal_dynamic_library_serialize_to_url(
+    _ handle: UnsafeMutableRawPointer?,
+    _ path: UnsafePointer<CChar>?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Bool {
+    guard #available(macOS 11.0, *),
+          let dynamicLibrary: MTLDynamicLibrary = am_borrow(handle),
+          let url = am_url(from: path)
+    else { return false }
+    do {
+        try dynamicLibrary.serialize(to: url)
+        return true
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return false
+    }
+}
+
+@_cdecl("ametal_binary_archive_add_compute_function")
+public func ametal_binary_archive_add_compute_function(
+    _ handle: UnsafeMutableRawPointer?,
+    _ functionHandle: UnsafeMutableRawPointer?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Bool {
+    guard #available(macOS 11.0, *),
+          let archive: MTLBinaryArchive = am_borrow(handle),
+          let function: MTLFunction = am_borrow(functionHandle)
+    else { return false }
+
+    let descriptor = MTLComputePipelineDescriptor()
+    descriptor.computeFunction = function
+    do {
+        try archive.addComputePipelineFunctions(descriptor: descriptor)
+        return true
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return false
+    }
+}
+
+@_cdecl("ametal_binary_archive_add_render_functions")
+public func ametal_binary_archive_add_render_functions(
+    _ handle: UnsafeMutableRawPointer?,
+    _ vertexHandle: UnsafeMutableRawPointer?,
+    _ fragmentHandle: UnsafeMutableRawPointer?,
+    _ colorPixelFormat: Int,
+    _ sampleCount: Int,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Bool {
+    guard let archive: MTLBinaryArchive = am_borrow(handle),
+          let vertex: MTLFunction = am_borrow(vertexHandle),
+          let fragment: MTLFunction = am_borrow(fragmentHandle),
+          sampleCount > 0,
+          let rawFormat = UInt(exactly: colorPixelFormat),
+          let colorFormat = MTLPixelFormat(rawValue: rawFormat)
+    else { return false }
+
+    let descriptor = MTLRenderPipelineDescriptor()
+    descriptor.vertexFunction = vertex
+    descriptor.fragmentFunction = fragment
+    descriptor.colorAttachments[0].pixelFormat = colorFormat
+    descriptor.sampleCount = sampleCount
+    guard amDeviceSupportsPixelFormat(archive.device, colorFormat) else {
+        am_store_error_message(outErrorMessage, "the device does not support the color pixel format")
+        return false
+    }
+
+    do {
+        try archive.addRenderPipelineFunctions(descriptor: descriptor)
+        return true
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return false
+    }
+}
+
+@_cdecl("ametal_binary_archive_serialize_to_url")
+public func ametal_binary_archive_serialize_to_url(
+    _ handle: UnsafeMutableRawPointer?,
+    _ path: UnsafePointer<CChar>?,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Bool {
+    guard #available(macOS 11.0, *),
+          let archive: MTLBinaryArchive = am_borrow(handle),
+          let url = am_url(from: path)
+    else { return false }
+    do {
+        try archive.serialize(to: url)
+        return true
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return false
+    }
+}
+
+@_cdecl("ametal_indirect_command_buffer_size")
+public func ametal_indirect_command_buffer_size(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let buffer: MTLIndirectCommandBuffer = am_borrow(handle) else { return 0 }
+    return buffer.size
+}
+
+@_cdecl("ametal_indirect_command_buffer_reset_range")
+public func ametal_indirect_command_buffer_reset_range(
+    _ handle: UnsafeMutableRawPointer?,
+    _ location: Int,
+    _ length: Int
+) -> Bool {
+    let (end, overflow) = location.addingReportingOverflow(length)
+    guard location >= 0,
+          length >= 0,
+          !overflow,
+          let buffer: MTLIndirectCommandBuffer = am_borrow(handle),
+          end <= buffer.size
+    else { return false }
+    buffer.reset(location..<end)
+    return true
+}
+
+@_cdecl("ametal_acceleration_structure_size")
+public func ametal_acceleration_structure_size(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let accelerationStructure: MTLAccelerationStructure = am_borrow(handle) else { return 0 }
+    return accelerationStructure.size
+}
+
+@_cdecl("ametal_intersection_function_table_set_opaque_triangle")
+public func ametal_intersection_function_table_set_opaque_triangle(
+    _ handle: UnsafeMutableRawPointer?,
+    _ signature: UInt,
+    _ index: Int
+) {
+    guard signature < (1 << 10),
+          index >= 0,
+          let table: MTLIntersectionFunctionTable = am_borrow(handle)
+    else { return }
+    table.setOpaqueTriangleIntersectionFunction(
+        signature: MTLIntersectionFunctionSignature(rawValue: signature),
+        index: index
+    )
+}
+
+@_cdecl("ametal_counter_sample_buffer_sample_count")
+public func ametal_counter_sample_buffer_sample_count(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard let sampleBuffer: MTLCounterSampleBuffer = am_borrow(handle) else { return 0 }
+    return sampleBuffer.sampleCount
+}
+
+@_cdecl("ametal_counter_sample_buffer_resolve_range")
+public func ametal_counter_sample_buffer_resolve_range(
+    _ handle: UnsafeMutableRawPointer?,
+    _ location: Int,
+    _ length: Int,
+    _ outLen: UnsafeMutablePointer<Int>?
+) -> UnsafeMutableRawPointer? {
+    let (end, overflow) = location.addingReportingOverflow(length)
+    guard location >= 0,
+          length > 0,
+          !overflow,
+          let sampleBuffer: MTLCounterSampleBuffer = am_borrow(handle),
+          end <= sampleBuffer.sampleCount
+    else { return nil }
+    do {
+        guard let data = try sampleBuffer.resolveCounterRange(location..<end) else {
+            return nil
+        }
+        outLen?.pointee = data.count
+        return am_copy_data(data)
+    } catch {
+        return nil
+    }
+}
+
+@_cdecl("ametal_residency_set_add_buffer")
+public func ametal_residency_set_add_buffer(
+    _ handle: UnsafeMutableRawPointer?,
+    _ bufferHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let buffer: MTLBuffer = am_borrow(bufferHandle)
+    else { return }
+    residencySet.addAllocation(buffer)
+}
+
+@_cdecl("ametal_residency_set_add_texture")
+public func ametal_residency_set_add_texture(
+    _ handle: UnsafeMutableRawPointer?,
+    _ textureHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let texture: MTLTexture = am_borrow(textureHandle)
+    else { return }
+    residencySet.addAllocation(texture)
+}
+
+@_cdecl("ametal_residency_set_add_heap")
+public func ametal_residency_set_add_heap(
+    _ handle: UnsafeMutableRawPointer?,
+    _ heapHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let heap: MTLHeap = am_borrow(heapHandle)
+    else { return }
+    residencySet.addAllocation(heap)
+}
+
+@_cdecl("ametal_residency_set_remove_buffer")
+public func ametal_residency_set_remove_buffer(
+    _ handle: UnsafeMutableRawPointer?,
+    _ bufferHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let buffer: MTLBuffer = am_borrow(bufferHandle)
+    else { return }
+    residencySet.removeAllocation(buffer)
+}
+
+@_cdecl("ametal_residency_set_remove_texture")
+public func ametal_residency_set_remove_texture(
+    _ handle: UnsafeMutableRawPointer?,
+    _ textureHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let texture: MTLTexture = am_borrow(textureHandle)
+    else { return }
+    residencySet.removeAllocation(texture)
+}
+
+@_cdecl("ametal_residency_set_remove_heap")
+public func ametal_residency_set_remove_heap(
+    _ handle: UnsafeMutableRawPointer?,
+    _ heapHandle: UnsafeMutableRawPointer?
+) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let heap: MTLHeap = am_borrow(heapHandle)
+    else { return }
+    residencySet.removeAllocation(heap)
+}
+
+@_cdecl("ametal_residency_set_remove_all_allocations")
+public func ametal_residency_set_remove_all_allocations(_ handle: UnsafeMutableRawPointer?) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle)
+    else { return }
+    residencySet.removeAllAllocations()
+}
+
+@_cdecl("ametal_residency_set_contains_buffer")
+public func ametal_residency_set_contains_buffer(
+    _ handle: UnsafeMutableRawPointer?,
+    _ bufferHandle: UnsafeMutableRawPointer?
+) -> Bool {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let buffer: MTLBuffer = am_borrow(bufferHandle)
+    else { return false }
+    return residencySet.containsAllocation(buffer)
+}
+
+@_cdecl("ametal_residency_set_contains_texture")
+public func ametal_residency_set_contains_texture(
+    _ handle: UnsafeMutableRawPointer?,
+    _ textureHandle: UnsafeMutableRawPointer?
+) -> Bool {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle),
+          let texture: MTLTexture = am_borrow(textureHandle)
+    else { return false }
+    return residencySet.containsAllocation(texture)
+}
+
+@_cdecl("ametal_residency_set_allocation_count")
+public func ametal_residency_set_allocation_count(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle)
+    else { return 0 }
+    return residencySet.allocationCount
+}
+
+@_cdecl("ametal_residency_set_commit")
+public func ametal_residency_set_commit(_ handle: UnsafeMutableRawPointer?) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle)
+    else { return }
+    residencySet.commit()
+}
+
+@_cdecl("ametal_residency_set_request_residency")
+public func ametal_residency_set_request_residency(_ handle: UnsafeMutableRawPointer?) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle)
+    else { return }
+    residencySet.requestResidency()
+}
+
+@_cdecl("ametal_residency_set_end_residency")
+public func ametal_residency_set_end_residency(_ handle: UnsafeMutableRawPointer?) {
+    guard #available(macOS 15.0, *),
+          let residencySet: MTLResidencySet = am_borrow(handle)
+    else { return }
+    residencySet.endResidency()
+}
+
+@_cdecl("ametal_capture_manager_shared")
+public func ametal_capture_manager_shared() -> UnsafeMutableRawPointer? {
+    return am_retain(MTLCaptureManager.shared() as AnyObject)
+}
+
+@_cdecl("ametal_capture_manager_supports_destination")
+public func ametal_capture_manager_supports_destination(
+    _ handle: UnsafeMutableRawPointer?,
+    _ destination: UInt
+) -> Bool {
+    guard let manager: MTLCaptureManager = am_borrow(handle),
+          let rawDestination = Int(exactly: destination),
+          let destination = MTLCaptureDestination(rawValue: rawDestination)
+    else { return false }
+    return manager.supportsDestination(destination)
+}
+
+@_cdecl("ametal_capture_manager_is_capturing")
+public func ametal_capture_manager_is_capturing(_ handle: UnsafeMutableRawPointer?) -> Bool {
+    guard let manager: MTLCaptureManager = am_borrow(handle) else { return false }
+    return manager.isCapturing
+}
+
+@_cdecl("ametal_capture_manager_new_scope_with_device")
+public func ametal_capture_manager_new_scope_with_device(
+    _ handle: UnsafeMutableRawPointer?,
+    _ deviceHandle: UnsafeMutableRawPointer?
+) -> UnsafeMutableRawPointer? {
+    guard let manager: MTLCaptureManager = am_borrow(handle),
+          let device: MTLDevice = am_borrow(deviceHandle)
+    else { return nil }
+    return am_retain(manager.makeCaptureScope(device: device) as AnyObject)
+}
+
+@_cdecl("ametal_capture_manager_new_scope_with_command_queue")
+public func ametal_capture_manager_new_scope_with_command_queue(
+    _ handle: UnsafeMutableRawPointer?,
+    _ queueHandle: UnsafeMutableRawPointer?
+) -> UnsafeMutableRawPointer? {
+    guard let manager: MTLCaptureManager = am_borrow(handle),
+          let queue: MTLCommandQueue = am_borrow(queueHandle)
+    else { return nil }
+    return am_retain(manager.makeCaptureScope(commandQueue: queue) as AnyObject)
+}
+
+@_cdecl("ametal_capture_scope_begin")
+public func ametal_capture_scope_begin(_ handle: UnsafeMutableRawPointer?) {
+    guard let scope: MTLCaptureScope = am_borrow(handle) else { return }
+    scope.begin()
+}
+
+@_cdecl("ametal_capture_scope_end")
+public func ametal_capture_scope_end(_ handle: UnsafeMutableRawPointer?) {
+    guard let scope: MTLCaptureScope = am_borrow(handle) else { return }
+    scope.end()
+}

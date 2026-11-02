@@ -1,0 +1,214 @@
+import Darwin
+import Foundation
+import Metal
+
+@_cdecl("ametal_new_class_instance")
+public func ametal_new_class_instance(_ className: UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? {
+    guard let className else { return nil }
+    guard let cls = NSClassFromString(String(cString: className)) as? NSObject.Type else {
+        return nil
+    }
+    return am_retain(cls.init())
+}
+
+@_cdecl("ametal_rasterization_rate_layer_descriptor_new")
+public func ametal_rasterization_rate_layer_descriptor_new(
+    _ horizontal: Int,
+    _ vertical: Int
+) -> UnsafeMutableRawPointer? {
+    guard horizontal > 0, vertical > 0, horizontal <= 16_384, vertical <= 16_384 else {
+        return nil
+    }
+    let sampleCount = MTLSize(width: horizontal, height: vertical, depth: 0)
+    return am_retain(MTLRasterizationRateLayerDescriptor(sampleCount: sampleCount))
+}
+
+@_cdecl("ametal_copy_metal_string_constant")
+public func ametal_copy_metal_string_constant(
+    _ symbolName: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>? {
+    guard let symbolName else { return nil }
+    guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), symbolName) else {
+        return nil
+    }
+
+    let value = symbol.assumingMemoryBound(to: Optional<NSString>.self).pointee
+    return am_copy_string(value as String?)
+}
+
+@_cdecl("ametal_copy_all_devices")
+public func ametal_copy_all_devices(
+    _ outCount: UnsafeMutablePointer<Int>?
+) -> UnsafeMutablePointer<UnsafeMutableRawPointer?>? {
+    let devices = MTLCopyAllDevices()
+    outCount?.pointee = devices.count
+    guard devices.count > 0 else { return nil }
+    let bytes = devices.count * MemoryLayout<UnsafeMutableRawPointer?>.stride
+    guard let buffer = malloc(bytes)?.assumingMemoryBound(to: UnsafeMutableRawPointer?.self) else {
+        outCount?.pointee = 0
+        return nil
+    }
+    for (index, device) in devices.enumerated() {
+        buffer[index] = am_retain(device)
+    }
+    return buffer
+}
+
+@_cdecl("ametal_copy_all_devices_with_observer")
+public func ametal_copy_all_devices_with_observer(
+    _ outCount: UnsafeMutablePointer<Int>?,
+    _ outObserver: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+    _ callback: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void)?,
+    _ context: UnsafeMutableRawPointer?,
+    _ release: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+) -> UnsafeMutablePointer<UnsafeMutableRawPointer?>? {
+    outCount?.pointee = 0
+    outObserver?.pointee = nil
+    guard let owner = AMCallbackContextOwner(context, release), let callback else {
+        return nil
+    }
+
+    let result = MTLCopyAllDevicesWithObserver { device, notification in
+        let notificationName = strdup(notification.rawValue)
+        callback(am_retain(device), notificationName, owner.context)
+        free(notificationName)
+    }
+    outObserver?.pointee = am_retain(result.observer)
+    outCount?.pointee = result.devices.count
+    guard result.devices.count > 0 else { return nil }
+    let bytes = result.devices.count * MemoryLayout<UnsafeMutableRawPointer?>.stride
+    guard let buffer = malloc(bytes)?.assumingMemoryBound(to: UnsafeMutableRawPointer?.self) else {
+        outCount?.pointee = 0
+        return nil
+    }
+    for (index, device) in result.devices.enumerated() {
+        buffer[index] = am_retain(device)
+    }
+    return buffer
+}
+
+@_cdecl("ametal_remove_device_observer")
+public func ametal_remove_device_observer(_ observerHandle: UnsafeMutableRawPointer?) {
+    guard let observer: NSObject = am_borrow(observerHandle) else { return }
+    MTLRemoveDeviceObserver(observer)
+}
+
+@_cdecl("ametal_io_compression_context_default_chunk_size")
+public func ametal_io_compression_context_default_chunk_size() -> Int {
+    if #available(macOS 13.0, *) {
+        return MTLIOCompressionContextDefaultChunkSize()
+    }
+    return 0
+}
+
+@_cdecl("ametal_io_create_compression_context")
+public func ametal_io_create_compression_context(
+    _ path: UnsafePointer<CChar>?,
+    _ method: Int,
+    _ chunkSize: Int
+) -> UnsafeMutableRawPointer? {
+    guard #available(macOS 13.0, *) else { return nil }
+    guard let path else { return nil }
+    guard let compressionMethod = MTLIOCompressionMethod(rawValue: method) else {
+        return nil
+    }
+    return MTLIOCreateCompressionContext(String(cString: path), compressionMethod, chunkSize)
+}
+
+@_cdecl("ametal_io_compression_context_append_data")
+public func ametal_io_compression_context_append_data(
+    _ handle: UnsafeMutableRawPointer?,
+    _ data: UnsafePointer<UInt8>?,
+    _ size: Int
+) {
+    guard #available(macOS 13.0, *) else { return }
+    guard let handle, let data else { return }
+    MTLIOCompressionContextAppendData(handle, data, size)
+}
+
+@_cdecl("ametal_io_flush_and_destroy_compression_context")
+public func ametal_io_flush_and_destroy_compression_context(_ handle: UnsafeMutableRawPointer?) -> Int {
+    guard #available(macOS 13.0, *) else { return 1 }
+    guard let handle else { return 1 }
+    return MTLIOFlushAndDestroyCompressionContext(handle).rawValue
+}
+
+@_cdecl("ametal_device_max_buffer_length")
+public func ametal_device_max_buffer_length(_ deviceHandle: UnsafeMutableRawPointer?) -> Int {
+    guard let device: MTLDevice = am_borrow(deviceHandle) else { return 0 }
+    return device.maxBufferLength
+}
+
+@_cdecl("ametal_tensors_supported")
+public func ametal_tensors_supported() -> Bool {
+    if #available(macOS 26.0, *) {
+        return true
+    }
+    return false
+}
+
+@_cdecl("ametal_device_new_tensor")
+public func ametal_device_new_tensor(
+    _ deviceHandle: UnsafeMutableRawPointer?,
+    _ dimensions: UnsafePointer<Int>?,
+    _ rank: Int,
+    _ dataType: Int,
+    _ usage: UInt,
+    _ storageMode: UInt,
+    _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutableRawPointer? {
+    #if compiler(>=6.2)
+    guard #available(macOS 26.0, *) else {
+        am_store_error_message(outErrorMessage, "MTLTensor requires macOS 26.0 or later")
+        return nil
+    }
+    guard let device: MTLDevice = am_borrow(deviceHandle),
+          (0...16).contains(rank),
+          usage & ~UInt(0x7) == 0,
+          let storage = MTLStorageMode(rawValue: storageMode),
+          storage == .shared || storage == .managed || storage == .private,
+          let type = MTLTensorDataType(rawValue: dataType)
+    else { return nil }
+    var values = [Int]()
+    if rank > 0 {
+        guard let dimensions else { return nil }
+        values = Array(UnsafeBufferPointer(start: dimensions, count: rank))
+    }
+    let bits: Int
+    switch dataType {
+    case 3, 29, 33: bits = 32
+    case 16, 121, 37, 41: bits = 16
+    case 45, 49: bits = 8
+    case 143, 144: bits = 4
+    default: return nil
+    }
+    var totalBits = bits
+    for extent in values {
+        let (product, overflow) = totalBits.multipliedReportingOverflow(by: extent)
+        guard extent >= 0, !overflow else { return nil }
+        totalBits = product
+    }
+    guard totalBits / 8 + (totalBits % 8 == 0 ? 0 : 1) <= device.maxBufferLength else {
+        am_store_error_message(outErrorMessage, "the tensor exceeds the device's buffer limit")
+        return nil
+    }
+    let extents = values.withUnsafeBufferPointer { buffer in
+        MTLTensorExtents(__rank: rank, values: rank == 0 ? nil : buffer.baseAddress)
+    }
+    guard let extents else { return nil }
+    let descriptor = MTLTensorDescriptor()
+    descriptor.dimensions = extents
+    descriptor.dataType = type
+    descriptor.usage = MTLTensorUsage(rawValue: usage)
+    descriptor.storageMode = storage
+    do {
+        return am_retain(try device.makeTensor(descriptor: descriptor) as AnyObject)
+    } catch {
+        am_store_error(outErrorMessage, error)
+        return nil
+    }
+    #else
+    am_store_error_message(outErrorMessage, "MTLTensor requires the macOS 26 SDK")
+    return nil
+    #endif
+}
