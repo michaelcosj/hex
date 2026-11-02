@@ -1145,7 +1145,15 @@ impl Parakeet {
         let model = Model::load_with(
             model_path,
             &ModelOptions {
-                backend: Backend::Metal,
+                // Override for benchmarking: HEX_BACKEND=cpu|cpuaccel|metal
+                backend: match std::env::var("HEX_BACKEND").as_deref() {
+                    Ok("cpu") => Backend::Cpu,
+                    Ok("cpuaccel") => Backend::CpuAccel,
+                    Ok("metal") => Backend::Metal,
+                    // Intel Mac: measured CPU ~2.5x faster than Metal (AMD Radeon Pro 455)
+                    _ if cfg!(target_arch = "x86_64") => Backend::Cpu,
+                    _ => Backend::Metal,
+                },
                 ..Default::default()
             },
         )
@@ -1156,7 +1164,10 @@ impl Parakeet {
             )
         })?;
         let device = model.device()?;
-        if device.kind != "metal" {
+        if device.kind != "metal"
+            && std::env::var("HEX_BACKEND").is_err()
+            && !cfg!(target_arch = "x86_64")
+        {
             return Err(eyre!(
                 "transcription model selected {} ({}) instead of Metal",
                 device.kind,
