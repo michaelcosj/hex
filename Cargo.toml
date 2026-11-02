@@ -42,6 +42,9 @@ strip = true
 [patch.crates-io]
 transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
 transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
+# Intel macOS builds from the Command Line Tools: SwiftPM cannot link a
+# manifest there, so the vendored crate compiles its Swift bridge directly.
+apple-metal = { path = "vendor/apple-metal" }
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
