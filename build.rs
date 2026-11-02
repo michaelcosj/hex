@@ -50,13 +50,19 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=Speech");
     // FoundationModels exists only on macOS 26 and later. Weak-link it, and
     // drop the object's strong autolink entry, so Hex still launches on older
-    // systems and reports Apple Intelligence as unavailable.
-    compile_swift_bridge(
-        "apple_intelligence",
-        "HEXAppleIntelligenceBridge",
-        &["FoundationModels"],
-    );
-    println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
+    // systems and reports Apple Intelligence as unavailable. The SDK behind the
+    // standalone Command Line Tools has no FoundationModels framework, so link
+    // it only when the SDK provides it.
+    if sdk_has_framework("FoundationModels") {
+        compile_swift_bridge(
+            "apple_intelligence",
+            "HEXAppleIntelligenceBridge",
+            &["FoundationModels"],
+        );
+        println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
+    } else {
+        compile_swift_bridge("apple_intelligence", "HEXAppleIntelligenceBridge", &[]);
+    }
     compile_swift_bridge("calendar", "HEXCalendarBridge", &[]);
     println!("cargo:rustc-link-lib=framework=EventKit");
     compile_permission_guide();
@@ -228,6 +234,24 @@ fn compile_permission_guide() {
         .file("native/permission_guide.m")
         .flag("-fobjc-arc")
         .compile("hex_permission_guide");
+}
+
+/// True when the active macOS SDK contains the named framework.
+fn sdk_has_framework(name: &str) -> bool {
+    let Ok(output) = Command::new("xcrun")
+        .args(["--sdk", "macosx", "--show-sdk-path"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let sdk = String::from_utf8_lossy(&output.stdout);
+    std::path::Path::new(sdk.trim())
+        .join("System/Library/Frameworks")
+        .join(format!("{name}.framework"))
+        .exists()
 }
 
 fn compile_swift_bridge(name: &str, module: &str, without_autolink: &[&str]) {

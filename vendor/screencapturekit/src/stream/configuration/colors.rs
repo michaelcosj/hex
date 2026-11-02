@@ -1,0 +1,253 @@
+//! Color and pixel format configuration
+//!
+//! Methods for configuring color space, pixel format, and background color.
+
+use crate::utils::{
+    ffi_string::{ffi_string_from_buffer, SMALL_BUFFER_SIZE},
+    four_char_code::FourCharCode,
+};
+
+const DEFAULT_ALPHA: f32 = 1.0;
+type BackgroundColor = (f32, f32, f32, f32);
+
+use super::{internal::SCStreamConfiguration, pixel_format::PixelFormat};
+
+/// `YCbCr` matrices accepted by `SCStreamConfiguration.colorMatrix`.
+///
+/// The property takes a `CFStringRef` and `ScreenCaptureKit` only honours the
+/// `kCGDisplayStreamYCbCrMatrix_*` values reproduced here; anything else is
+/// ignored by the system with no diagnostic. Using these constants instead of
+/// a hand-written literal is the difference between "the matrix was applied"
+/// and "the matrix was silently dropped".
+///
+/// The matrix only affects `YCbCr` pixel formats (`420v` / `420f` /
+/// [`PixelFormat::YCbCr_420v`] and friends); it is inert for BGRA capture.
+///
+/// # Examples
+///
+/// ```
+/// use screencapturekit::stream::configuration::{color_matrix, SCStreamConfiguration};
+///
+/// let config = SCStreamConfiguration::new().with_color_matrix(color_matrix::ITU_R_709_2).expect("color matrix has no NUL byte");
+/// ```
+pub mod color_matrix {
+    /// `kCGDisplayStreamYCbCrMatrix_ITU_R_709_2` — HD (Rec. 709).
+    pub const ITU_R_709_2: &str = "ITU_R_709_2";
+    /// `kCGDisplayStreamYCbCrMatrix_ITU_R_601_4` — SD (Rec. 601).
+    pub const ITU_R_601_4: &str = "ITU_R_601_4";
+    /// `kCGDisplayStreamYCbCrMatrix_SMPTE_240M_1995` — SMPTE 240M.
+    pub const SMPTE_240M_1995: &str = "SMPTE_240M_1995";
+}
+
+/// Color-space names accepted by `SCStreamConfiguration.colorSpaceName`.
+///
+/// These mirror the `kCGColorSpace*` constants; `SRGB` is the system default
+/// for SDR capture and `DISPLAY_P3` / `EXTENDED_LINEAR_DISPLAY_P3` are the
+/// usual choices for wide-gamut and HDR pipelines.
+pub mod color_space {
+    /// `kCGColorSpaceSRGB`
+    pub const SRGB: &str = "kCGColorSpaceSRGB";
+    /// `kCGColorSpaceDisplayP3`
+    pub const DISPLAY_P3: &str = "kCGColorSpaceDisplayP3";
+    /// `kCGColorSpaceExtendedLinearDisplayP3`
+    pub const EXTENDED_LINEAR_DISPLAY_P3: &str = "kCGColorSpaceExtendedLinearDisplayP3";
+    /// `kCGColorSpaceExtendedLinearSRGB`
+    pub const EXTENDED_LINEAR_SRGB: &str = "kCGColorSpaceExtendedLinearSRGB";
+    /// `kCGColorSpaceITUR_2100_PQ`
+    pub const ITUR_2100_PQ: &str = "kCGColorSpaceITUR_2100_PQ";
+}
+
+/// A string that could not be forwarded to `ScreenCaptureKit`.
+///
+/// The native properties take C strings, so a value containing an interior NUL
+/// byte cannot be represented without truncating it into a different — and
+/// silently wrong — identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InteriorNulError;
+
+impl std::fmt::Display for InteriorNulError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("value contains an interior NUL byte and cannot cross the C boundary")
+    }
+}
+
+impl std::error::Error for InteriorNulError {}
+
+impl From<InteriorNulError> for crate::error::SCError {
+    fn from(error: InteriorNulError) -> Self {
+        Self::InvalidConfiguration(error.to_string())
+    }
+}
+
+impl SCStreamConfiguration {
+    /// Set the pixel format for captured frames
+    ///
+    /// Streams created via [`Self::new`] / [`Self::default`] are pinned to
+    /// [`PixelFormat::BGRA`] at construction time, so calling this method is
+    /// only required when you want a non-BGRA format (e.g. YUV `420v` for
+    /// video encoding, or `l10r` for HDR). Apple's runtime default for
+    /// `SCStreamConfiguration()` varies by macOS release — see
+    /// [`PixelFormat::BGRA`] for context.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use screencapturekit::stream::configuration::{SCStreamConfiguration, PixelFormat};
+    ///
+    /// let mut config = SCStreamConfiguration::default();
+    /// config.set_pixel_format(PixelFormat::BGRA);
+    /// ```
+    pub fn set_pixel_format(&mut self, pixel_format: PixelFormat) -> &mut Self {
+        let four_char_code: FourCharCode = pixel_format.into();
+        unsafe {
+            crate::ffi::sc_stream_configuration_set_pixel_format(
+                self.as_ptr(),
+                four_char_code.as_u32(),
+            );
+        }
+        self
+    }
+
+    /// Set the pixel format (builder pattern)
+    #[must_use]
+    pub fn with_pixel_format(mut self, pixel_format: PixelFormat) -> Self {
+        self.set_pixel_format(pixel_format);
+        self
+    }
+
+    /// Get the current pixel format
+    pub fn pixel_format(&self) -> PixelFormat {
+        unsafe {
+            let value = crate::ffi::sc_stream_configuration_get_pixel_format(self.as_ptr());
+            PixelFormat::from(value)
+        }
+    }
+
+    /// Set the background color for captured content with an explicit alpha value.
+    ///
+    /// Available on macOS 13.0+
+    pub fn set_background_color_rgba(&mut self, r: f32, g: f32, b: f32, a: f32) -> &mut Self {
+        unsafe {
+            crate::ffi::sc_stream_configuration_set_background_color(self.as_ptr(), r, g, b, a);
+        }
+        self
+    }
+
+    /// Set the background color for captured content.
+    ///
+    /// This convenience overload uses an opaque alpha channel (`1.0`).
+    pub fn set_background_color(&mut self, r: f32, g: f32, b: f32) -> &mut Self {
+        self.set_background_color_rgba(r, g, b, DEFAULT_ALPHA)
+    }
+
+    /// Set the background color with an explicit alpha value (builder pattern).
+    #[must_use]
+    pub fn with_background_color_rgba(mut self, r: f32, g: f32, b: f32, a: f32) -> Self {
+        self.set_background_color_rgba(r, g, b, a);
+        self
+    }
+
+    /// Set the background color (builder pattern).
+    ///
+    /// This convenience overload uses an opaque alpha channel (`1.0`).
+    #[must_use]
+    pub fn with_background_color(mut self, r: f32, g: f32, b: f32) -> Self {
+        self.set_background_color(r, g, b);
+        self
+    }
+
+    /// Get the current background color, if it was set through this wrapper.
+    pub fn background_color(&self) -> Option<BackgroundColor> {
+        let mut r = 0.0f32;
+        let mut g = 0.0f32;
+        let mut b = 0.0f32;
+        let mut a = 0.0f32;
+        // The value is read back from the Swift bridge's per-configuration
+        // state (keyed by object identity and released with the configuration),
+        // so there is no Rust-side cache to leak or to go stale on pointer reuse.
+        let was_set = unsafe {
+            crate::ffi::sc_stream_configuration_get_background_color(
+                self.as_ptr(),
+                &raw mut r,
+                &raw mut g,
+                &raw mut b,
+                &raw mut a,
+            )
+        };
+        was_set.then_some((r, g, b, a))
+    }
+
+    /// Set the color space name for captured content.
+    ///
+    /// Available on macOS 13.0+. Use the [`color_space`] constants for the
+    /// values `ScreenCaptureKit` recognises.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InteriorNulError`] — leaving the configuration unchanged — if
+    /// `name` contains an interior NUL byte.
+    pub fn set_color_space_name(&mut self, name: &str) -> Result<&mut Self, InteriorNulError> {
+        let c_name = std::ffi::CString::new(name).map_err(|_| InteriorNulError)?;
+        unsafe {
+            crate::ffi::sc_stream_configuration_set_color_space_name(
+                self.as_ptr(),
+                c_name.as_ptr(),
+            );
+        }
+        Ok(self)
+    }
+
+    /// Set the color space name (builder pattern).
+    #[allow(clippy::missing_errors_doc)]
+    pub fn with_color_space_name(mut self, name: &str) -> Result<Self, InteriorNulError> {
+        self.set_color_space_name(name)?;
+        Ok(self)
+    }
+
+    /// Get the color space name for captured content.
+    pub fn color_space_name(&self) -> Option<String> {
+        unsafe {
+            ffi_string_from_buffer(SMALL_BUFFER_SIZE, |buf, len| {
+                crate::ffi::sc_stream_configuration_get_color_space_name(self.as_ptr(), buf, len)
+            })
+        }
+    }
+
+    /// Set the `YCbCr` color matrix for captured content.
+    ///
+    /// Available on macOS 13.0+. `matrix` must be one of the [`color_matrix`]
+    /// constants — despite the free-form `&str` signature the property is a
+    /// closed set of `kCGDisplayStreamYCbCrMatrix_*` identifiers, and any
+    /// other string is ignored by the system without an error. The setting
+    /// only affects `YCbCr` pixel formats and is inert for BGRA capture.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InteriorNulError`] — leaving the configuration unchanged — if
+    /// `matrix` contains an interior NUL byte.
+    pub fn set_color_matrix(&mut self, matrix: &str) -> Result<&mut Self, InteriorNulError> {
+        let c_matrix = std::ffi::CString::new(matrix).map_err(|_| InteriorNulError)?;
+        unsafe {
+            crate::ffi::sc_stream_configuration_set_color_matrix(self.as_ptr(), c_matrix.as_ptr());
+        }
+        Ok(self)
+    }
+
+    /// Get the color matrix for captured content.
+    ///
+    /// Returns the color matrix as a string, or `None` if not set.
+    pub fn color_matrix(&self) -> Option<String> {
+        unsafe {
+            ffi_string_from_buffer(SMALL_BUFFER_SIZE, |buf, len| {
+                crate::ffi::sc_stream_configuration_get_color_matrix(self.as_ptr(), buf, len)
+            })
+        }
+    }
+
+    /// Set the color matrix (builder pattern)
+    #[allow(clippy::missing_errors_doc)]
+    pub fn with_color_matrix(mut self, matrix: &str) -> Result<Self, InteriorNulError> {
+        self.set_color_matrix(matrix)?;
+        Ok(self)
+    }
+}

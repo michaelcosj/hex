@@ -1,0 +1,180 @@
+//! Error handling tests
+//!
+//! Tests for error types and error handling
+
+use screencapturekit::error::SCError;
+
+#[test]
+fn test_invalid_dimension_error() {
+    let err = SCError::invalid_dimension("width", 0);
+    let display = format!("{err}");
+
+    assert!(display.contains("width"));
+    assert!(display.contains('0'));
+}
+
+#[test]
+fn test_permission_denied_error() {
+    let err = SCError::permission_denied("Screen Recording");
+    let display = format!("{err}");
+
+    // Just verify it has content
+    assert!(!display.is_empty());
+    assert!(display.contains("Screen Recording"));
+}
+
+#[test]
+fn test_internal_error() {
+    let err = SCError::internal_error("Something went wrong");
+    let display = format!("{err}");
+
+    assert!(display.contains("Something went wrong"));
+}
+
+#[test]
+fn test_error_equality() {
+    let err1 = SCError::invalid_dimension("width", 0);
+    let err2 = SCError::invalid_dimension("width", 0);
+    let err3 = SCError::invalid_dimension("height", 0);
+
+    assert_eq!(err1, err2);
+    assert_ne!(err1, err3);
+}
+
+#[test]
+fn test_error_debug() {
+    let err = SCError::permission_denied("Screen Recording");
+    let debug = format!("{err:?}");
+
+    assert!(debug.contains("Screen Recording"));
+}
+
+#[test]
+fn test_error_display_vs_debug() {
+    let err = SCError::internal_error("Test error");
+
+    let display = format!("{err}");
+    let debug = format!("{err:?}");
+
+    // Both should contain error information
+    assert!(!display.is_empty());
+    assert!(!debug.is_empty());
+}
+
+#[test]
+fn test_error_types_are_different() {
+    let err1 = SCError::invalid_dimension("width", 0);
+    let err2 = SCError::permission_denied("Screen Recording");
+    let err3 = SCError::internal_error("Internal");
+
+    assert_ne!(err1, err2);
+    assert_ne!(err1, err3);
+    assert_ne!(err2, err3);
+}
+
+#[test]
+fn test_error_in_result() {
+    let result: Result<(), SCError> = Err(SCError::permission_denied("Test"));
+
+    assert!(result.is_err());
+
+    if let Err(err) = result {
+        let display = format!("{err}");
+        assert!(display.contains("Test"));
+    }
+}
+
+#[test]
+fn test_error_propagation() {
+    fn failing_function() -> Result<(), SCError> {
+        Err(SCError::internal_error("Failed"))
+    }
+
+    fn calling_function() -> Result<(), SCError> {
+        failing_function()?;
+        Ok(())
+    }
+
+    let result = calling_function();
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_multiple_error_messages() {
+    let errors = [
+        SCError::invalid_dimension("width", 0),
+        SCError::invalid_dimension("height", 0),
+        SCError::permission_denied("Screen Recording"),
+        SCError::permission_denied("Microphone"),
+        SCError::internal_error("Error 1"),
+        SCError::internal_error("Error 2"),
+    ];
+
+    for err in errors {
+        let display = format!("{err}");
+        assert!(!display.is_empty());
+    }
+}
+
+#[test]
+fn test_error_is_std_error() {
+    fn assert_error<T: std::error::Error>() {}
+    assert_error::<SCError>();
+}
+
+#[test]
+fn test_all_error_variants_display() {
+    // Test that all error variants have non-empty display strings
+    let errors: Vec<SCError> = vec![
+        SCError::InvalidConfiguration("test".to_string()),
+        SCError::InvalidDimension {
+            field: "width".to_string(),
+            value: 0,
+        },
+        SCError::InvalidPixelFormat("test".to_string()),
+        SCError::NoShareableContent("test".to_string()),
+        SCError::DisplayNotFound("test".to_string()),
+        SCError::WindowNotFound("test".to_string()),
+        SCError::ApplicationNotFound("test".to_string()),
+        SCError::StreamError("test".to_string()),
+        SCError::CaptureStartFailed("test".to_string()),
+        SCError::CaptureStopFailed("test".to_string()),
+        SCError::BufferLockError("test".to_string()),
+        SCError::BufferUnlockError("test".to_string()),
+        SCError::InvalidBuffer("test".to_string()),
+        SCError::ScreenshotError("test".to_string()),
+        SCError::PermissionDenied("test".to_string()),
+        SCError::FeatureNotAvailable {
+            feature: "test".to_string(),
+            required_version: "14.0".to_string(),
+        },
+        SCError::FFIError("test".to_string()),
+        SCError::NullPointer("test".to_string()),
+        SCError::Timeout("test".to_string()),
+        SCError::InternalError("test".to_string()),
+        SCError::OSError {
+            code: 1,
+            message: "test".to_string(),
+        },
+    ];
+
+    for err in errors {
+        let display = format!("{err}");
+        assert!(
+            !display.is_empty(),
+            "Display should not be empty for {err:?}"
+        );
+    }
+}
+
+#[test]
+fn test_unknown_value_error_names_the_type_and_raw_value() {
+    let error = SCError::UnknownValue {
+        type_name: "SCCaptureDynamicRange",
+        raw: 7,
+    };
+    assert_eq!(
+        error.to_string(),
+        "ScreenCaptureKit reported 7, which is not a known SCCaptureDynamicRange"
+    );
+}

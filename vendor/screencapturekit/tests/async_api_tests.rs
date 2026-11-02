@@ -1,0 +1,1762 @@
+//! Async API tests
+//!
+//! These tests verify the async API types and traits work correctly.
+//! Note: Tests that require screen capture permission are marked `no_run`.
+
+#![cfg(feature = "async")]
+#![allow(clippy::match_same_arms)]
+
+mod common;
+
+use screencapturekit::async_api::*;
+use screencapturekit::stream::output_type::SCStreamOutputType;
+use std::time::Duration;
+
+async fn live_shareable_content() -> Option<screencapturekit::shareable_content::SCShareableContent>
+{
+    if !crate::common::screen_capture_allowed() {
+        return None;
+    }
+    match tokio::time::timeout(Duration::from_secs(5), AsyncSCShareableContent::get()).await {
+        Ok(Ok(content)) => Some(content),
+        Ok(Err(error)) => {
+            eprintln!("skip: shareable content unavailable: {error}");
+            None
+        }
+        Err(_) => {
+            eprintln!("skip: shareable content query did not complete within 5 seconds");
+            None
+        }
+    }
+}
+
+#[test]
+fn test_async_shareable_content_options_builder() {
+    let options = AsyncSCShareableContentOptions::default()
+        .with_exclude_desktop_windows(true)
+        .with_on_screen_windows_only(true);
+
+    // Test that builder pattern works (options are consumed)
+    assert_eq!(
+        options,
+        AsyncSCShareableContentOptions::default()
+            .with_exclude_desktop_windows(true)
+            .with_on_screen_windows_only(true)
+    );
+}
+
+#[test]
+fn test_async_shareable_content_options_default() {
+    let options = AsyncSCShareableContentOptions::default();
+    let default = AsyncSCShareableContentOptions::default();
+    assert_eq!(options, default);
+}
+
+#[test]
+fn test_async_shareable_content_options_clone() {
+    let options = AsyncSCShareableContentOptions::default().with_exclude_desktop_windows(true);
+    let cloned = options.clone();
+    assert_eq!(options, cloned);
+}
+
+#[test]
+fn test_async_shareable_content_options_debug() {
+    let options = AsyncSCShareableContentOptions::default();
+    let debug_str = format!("{options:?}");
+    assert!(debug_str.contains("AsyncSCShareableContentOptions"));
+}
+
+#[test]
+fn test_async_shareable_content_options_builder_chain() {
+    // Test all builder methods
+    let options = AsyncSCShareableContentOptions::default()
+        .with_exclude_desktop_windows(false)
+        .with_on_screen_windows_only(false)
+        .with_exclude_desktop_windows(true)
+        .with_on_screen_windows_only(true);
+
+    // Each call should update the value
+    let expected = AsyncSCShareableContentOptions::default()
+        .with_exclude_desktop_windows(true)
+        .with_on_screen_windows_only(true);
+
+    assert_eq!(options, expected);
+}
+
+#[test]
+fn test_async_shareable_content_debug() {
+    let content = AsyncSCShareableContent;
+    let debug_str = format!("{content:?}");
+    assert!(debug_str.contains("AsyncSCShareableContent"));
+}
+
+#[test]
+fn test_async_shareable_content_clone() {
+    let content = AsyncSCShareableContent;
+    let cloned = content;
+    // Both are unit structs, should be equal
+    let _ = cloned;
+}
+
+#[test]
+fn test_async_shareable_content_copy() {
+    let content = AsyncSCShareableContent;
+    let copied = content;
+    // Copy trait test
+    let _ = (content, copied);
+}
+
+#[test]
+fn test_async_shareable_content_with_options() {
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+    // Test that with_options returns the options builder
+    let options = AsyncSCShareableContent::create();
+    let debug_str = format!("{options:?}");
+    assert!(debug_str.contains("AsyncSCShareableContentOptions"));
+}
+
+#[test]
+fn test_async_shareable_content_future_debug() {
+    // Create a future and verify it has Debug
+    fn assert_debug<T: std::fmt::Debug>() {}
+    assert_debug::<AsyncShareableContentFuture>();
+}
+
+#[test]
+fn test_async_stream_creation() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    // This may fail if no permission, that's OK - we're testing the API surface
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+
+            let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // Test basic methods
+            assert!(!stream.is_closed());
+            assert_eq!(stream.buffered_count(), 0);
+
+            // Test try_next on empty buffer
+            let sample = stream.try_next();
+            assert!(sample.is_none());
+
+            // Test clear_buffer
+            stream.clear_buffer();
+            assert_eq!(stream.buffered_count(), 0);
+
+            // Test inner() accessor
+            let _inner = stream.inner();
+
+            // Test debug
+            let debug_str = format!("{stream:?}");
+            assert!(debug_str.contains("AsyncSCStream"));
+            assert!(debug_str.contains("buffered_count"));
+            assert!(debug_str.contains("is_closed"));
+        }
+    }
+}
+
+#[test]
+fn test_async_stream_with_audio() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+
+            // Create with Audio output type
+            let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Audio)
+                .expect("failed to create stream");
+            assert!(!stream.is_closed());
+            assert_eq!(stream.buffered_count(), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_async_stream_start_stop_capture() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+
+            let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // Start capture
+            let start_result = stream.start_capture().await;
+            assert!(start_result.is_ok(), "Should start capture");
+
+            // Small delay to let capture initialize
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Stop capture
+            let stop_result = stream.stop_capture().await;
+            assert!(stop_result.is_ok(), "Should stop capture");
+        }
+    }
+}
+
+#[tokio::test]
+#[cfg(feature = "macos_14_0")]
+async fn test_async_stream_update_configuration() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+
+            let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // Start capture first
+            let _ = stream.start_capture().await;
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Update configuration
+            let new_config = SCStreamConfiguration::new()
+                .with_width(200)
+                .with_height(200);
+
+            let update_result = stream.update_configuration(&new_config).await;
+            // This may fail if stream is not running, that's ok
+            let _ = update_result;
+
+            let _ = stream.stop_capture().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_async_stream_update_content_filter() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+
+            let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // Start capture first
+            let _ = stream.start_capture().await;
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Update content filter
+            let new_filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+
+            let update_result = stream.update_content_filter(&new_filter).await;
+            // This may fail if stream is not running, that's ok
+            let _ = update_result;
+
+            let _ = stream.stop_capture().await;
+        }
+    }
+}
+
+#[test]
+fn test_async_stream_next_future() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+
+            let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // Get the next future (tests the next() method)
+            let next_future = stream.next();
+            let debug_str = format!("{next_future:?}");
+            assert!(debug_str.contains("NextSample"));
+        }
+    }
+}
+
+#[test]
+fn test_async_stream_debug() {
+    fn assert_debug<T: std::fmt::Debug>() {}
+    assert_debug::<AsyncSCStream>();
+}
+
+#[test]
+fn test_next_sample_debug() {
+    fn assert_debug<T: std::fmt::Debug>() {}
+    assert_debug::<NextSample<'_>>();
+}
+
+#[test]
+fn test_next_sample_typed_debug() {
+    fn assert_debug<T: std::fmt::Debug>() {}
+    assert_debug::<NextSampleTyped<'_>>();
+}
+
+#[test]
+fn test_sample_stream_types_debug_and_stream() {
+    fn assert_debug<T: std::fmt::Debug>() {}
+    fn assert_stream<T: futures_util::Stream>() {}
+
+    assert_debug::<SampleStream<'_>>();
+    assert_debug::<TypedSampleStream<'_>>();
+    // Compile-time proof the adapters implement `futures_core::Stream`.
+    assert_stream::<SampleStream<'_>>();
+    assert_stream::<TypedSampleStream<'_>>();
+}
+
+#[test]
+fn test_stream_control_future_is_send_and_debug() {
+    // The lifecycle control futures must be `Send` so they can be driven on
+    // multi-threaded executors and moved across `tokio::spawn` boundaries, and
+    // `Debug` for ergonomic logging. This is a compile-time guarantee.
+    fn assert_send<T: Send>() {}
+    fn assert_debug<T: std::fmt::Debug>() {}
+    assert_send::<StreamControlFuture>();
+    assert_debug::<StreamControlFuture>();
+}
+
+#[test]
+fn test_async_stream_output_type() {
+    // Test SCStreamOutputType enum values
+    assert_ne!(SCStreamOutputType::Screen, SCStreamOutputType::Audio);
+
+    let screen = SCStreamOutputType::Screen;
+    let audio = SCStreamOutputType::Audio;
+
+    let debug_screen = format!("{screen:?}");
+    let debug_audio = format!("{audio:?}");
+
+    assert!(debug_screen.contains("Screen"));
+    assert!(debug_audio.contains("Audio"));
+}
+
+#[test]
+fn test_async_stream_take_error_initially_none() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(100)
+                .with_height(100);
+            let stream = AsyncSCStream::new(&filter, &config, 4, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // A freshly created stream is open and has no stop error.
+            assert!(!stream.is_closed());
+            assert!(stream.take_error().is_none());
+        }
+    }
+}
+
+#[test]
+fn test_async_stream_multi_output_typed() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    if let Ok(content) = SCShareableContent::get() {
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+            let config = SCStreamConfiguration::new()
+                .with_width(160)
+                .with_height(120)
+                .with_captures_audio(true);
+
+            let mut stream = AsyncSCStream::new(&filter, &config, 16, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            // Nothing is buffered before capture starts.
+            assert!(stream.try_next_typed().is_none());
+
+            // Add audio as a second output type so one stream carries A/V.
+            let _registered = stream.add_output_type(SCStreamOutputType::Audio).is_ok();
+
+            if stream.inner().start_capture().is_ok() {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+
+                // Every delivered sample must be correctly tagged with its type.
+                while let Some((_buf, ty)) = stream.try_next_typed() {
+                    assert!(matches!(
+                        ty,
+                        SCStreamOutputType::Screen
+                            | SCStreamOutputType::Audio
+                            | SCStreamOutputType::Microphone
+                    ));
+                }
+
+                let _ = stream.inner().stop_capture();
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_async_stream_frames_streamext_combinators() {
+    use futures_util::StreamExt;
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    let Ok(content) = SCShareableContent::get() else {
+        return;
+    };
+    let displays = content.displays();
+    let Some(display) = displays.first() else {
+        return;
+    };
+
+    let filter = SCContentFilter::create()
+        .with_display(display)
+        .with_excluding_windows(&[])
+        .build()
+        .expect("failed to build content filter");
+    let config = SCStreamConfiguration::new()
+        .with_width(160)
+        .with_height(120)
+        .with_shows_cursor(true);
+
+    let stream = AsyncSCStream::new(&filter, &config, 16, SCStreamOutputType::Screen)
+        .expect("failed to create stream");
+
+    if stream.start_capture().await.is_ok() {
+        // Drive the `futures_core::Stream` impl through `StreamExt`: take at most
+        // 3 frames, mapping each to a unit so we exercise a combinator chain.
+        // A timeout keeps a static screen from hanging the test.
+        let collected = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            stream
+                .frames()
+                .map(|_frame| ())
+                .take(3)
+                .collect::<Vec<()>>(),
+        )
+        .await;
+
+        // Either we collected up to 3 frames, or we timed out — both are fine on
+        // CI; the point is the StreamExt chain type-checks and drives the stream.
+        if let Ok(frames) = collected {
+            assert!(frames.len() <= 3);
+        }
+
+        let _ = stream.stop_capture().await;
+    }
+}
+
+#[cfg(feature = "macos_14_0")]
+mod macos_14_tests {
+    use super::*;
+
+    #[test]
+    fn test_async_screenshot_manager_exists() {
+        // Just verify the type exists and is accessible
+        let _ = AsyncSCScreenshotManager;
+    }
+
+    #[test]
+    fn test_async_screenshot_manager_debug() {
+        let manager = AsyncSCScreenshotManager;
+        let debug_str = format!("{manager:?}");
+        assert!(debug_str.contains("AsyncSCScreenshotManager"));
+    }
+
+    #[test]
+    fn test_async_screenshot_future_debug() {
+        fn assert_debug<T: std::fmt::Debug>() {}
+        assert_debug::<AsyncScreenshotFuture<()>>();
+    }
+
+    #[test]
+    fn test_async_picker_future_debug() {
+        fn assert_debug<T: std::fmt::Debug>() {}
+        assert_debug::<AsyncPickerFuture>();
+        assert_debug::<AsyncPickerFilterFuture>();
+    }
+
+    #[test]
+    fn test_async_content_sharing_picker_exists() {
+        let _ = AsyncSCContentSharingPicker;
+    }
+
+    #[test]
+    fn test_async_content_sharing_picker_debug() {
+        let picker = AsyncSCContentSharingPicker;
+        let debug_str = format!("{picker:?}");
+        assert!(debug_str.contains("AsyncSCContentSharingPicker"));
+    }
+}
+
+#[cfg(feature = "macos_15_0")]
+mod macos_15_tests {
+    use super::*;
+
+    #[test]
+    fn test_recording_event_variants() {
+        let started = RecordingEvent::Started;
+        let finished = RecordingEvent::Finished;
+        let failed = RecordingEvent::Failed("test error".to_string());
+
+        assert_eq!(started, RecordingEvent::Started);
+        assert_eq!(finished, RecordingEvent::Finished);
+        assert_ne!(started, finished);
+
+        if let RecordingEvent::Failed(msg) = failed {
+            assert_eq!(msg, "test error");
+        } else {
+            panic!("Expected Failed variant");
+        }
+    }
+
+    #[test]
+    fn test_recording_event_debug() {
+        let event = RecordingEvent::Started;
+        let debug_str = format!("{event:?}");
+        assert!(debug_str.contains("Started"));
+
+        let event = RecordingEvent::Failed("error".to_string());
+        let debug_str = format!("{event:?}");
+        assert!(debug_str.contains("Failed"));
+        assert!(debug_str.contains("error"));
+    }
+
+    #[test]
+    fn test_recording_event_clone() {
+        let event = RecordingEvent::Failed("clone test".to_string());
+        let cloned = event.clone();
+        assert_eq!(event, cloned);
+    }
+
+    #[test]
+    fn test_recording_event_equality() {
+        assert_eq!(RecordingEvent::Started, RecordingEvent::Started);
+        assert_eq!(RecordingEvent::Finished, RecordingEvent::Finished);
+        assert_ne!(RecordingEvent::Started, RecordingEvent::Finished);
+
+        let failed1 = RecordingEvent::Failed("error".to_string());
+        let failed2 = RecordingEvent::Failed("error".to_string());
+        let failed3 = RecordingEvent::Failed("different".to_string());
+
+        assert_eq!(failed1, failed2);
+        assert_ne!(failed1, failed3);
+    }
+
+    #[test]
+    fn test_next_recording_event_debug() {
+        fn assert_debug<T: std::fmt::Debug>() {}
+        assert_debug::<NextRecordingEvent<'_>>();
+    }
+
+    #[test]
+    fn test_async_recording_output_debug() {
+        fn assert_debug<T: std::fmt::Debug>() {}
+        assert_debug::<AsyncSCRecordingOutput>();
+    }
+}
+
+// ============================================================================
+// Real capture tests (require screen capture permission)
+// ============================================================================
+
+mod capture_tests {
+    use screencapturekit::async_api::*;
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    use screencapturekit::stream::output_type::SCStreamOutputType;
+    use std::time::Duration;
+
+    #[test]
+    fn test_async_stream_capture_frames() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(320)
+                    .with_height(240)
+                    .with_shows_cursor(true);
+
+                let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                // Start capture
+                if stream.inner().start_capture().is_ok() {
+                    // Wait a bit for frames to arrive
+                    std::thread::sleep(Duration::from_millis(300));
+
+                    // Check if we got any frames
+                    let count = stream.buffered_count();
+                    // May or may not have frames depending on timing
+                    let _ = count;
+
+                    // Try to get a frame using try_next
+                    let sample = stream.try_next();
+                    if let Some(sample) = sample {
+                        // Verify the sample has data
+                        assert!(!sample.is_valid() || sample.is_valid());
+                    }
+
+                    let _ = stream.inner().stop_capture();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_async_stream_buffer_capacity() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120)
+                    .with_shows_cursor(true);
+
+                // Small buffer capacity
+                let stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                if stream.inner().start_capture().is_ok() {
+                    // Wait for buffer to potentially fill
+                    std::thread::sleep(Duration::from_millis(200));
+
+                    // Buffer should not exceed capacity
+                    assert!(stream.buffered_count() <= 2);
+
+                    let _ = stream.inner().stop_capture();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_async_stream_clear_buffer() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120)
+                    .with_shows_cursor(true);
+
+                let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                if stream.inner().start_capture().is_ok() {
+                    std::thread::sleep(Duration::from_millis(200));
+
+                    // Clear the buffer
+                    stream.clear_buffer();
+                    assert_eq!(stream.buffered_count(), 0);
+
+                    let _ = stream.inner().stop_capture();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_async_stream_is_closed_after_stop() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120);
+
+                let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                assert!(!stream.is_closed());
+
+                if stream.inner().start_capture().is_ok() {
+                    assert!(!stream.is_closed());
+
+                    let _ = stream.inner().stop_capture();
+                    // Note: is_closed may or may not be true immediately after stop
+                    // depending on implementation
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_async_stream_multiple_try_next() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120)
+                    .with_shows_cursor(true);
+
+                let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                if stream.inner().start_capture().is_ok() {
+                    std::thread::sleep(Duration::from_millis(200));
+
+                    // Try to get multiple frames
+                    let mut frame_count = 0;
+                    while let Some(_sample) = stream.try_next() {
+                        frame_count += 1;
+                        if frame_count >= 3 {
+                            break;
+                        }
+                    }
+
+                    let _ = stream.inner().stop_capture();
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Async future polling tests
+// ============================================================================
+
+mod future_polling_tests {
+    use screencapturekit::async_api::*;
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    use screencapturekit::stream::output_type::SCStreamOutputType;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+    use std::time::Duration;
+
+    // Simple waker that does nothing (for single poll tests)
+    fn dummy_waker() -> Waker {
+        fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        const fn wake(_: *const ()) {}
+        const fn wake_by_ref(_: *const ()) {}
+        const fn drop(_: *const ()) {}
+
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+        let raw = RawWaker::new(std::ptr::null(), &VTABLE);
+        unsafe { Waker::from_raw(raw) }
+    }
+
+    #[test]
+    fn test_next_sample_future_poll_pending() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120);
+
+                let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                // Create future but don't start capture - should poll Pending or None
+                let mut future = stream.next();
+                let waker = dummy_waker();
+                let mut cx = Context::from_waker(&waker);
+
+                // Poll the future
+                let result = Pin::new(&mut future).poll(&mut cx);
+                // Either Pending (waiting for frames) or Ready(None) if closed
+                match result {
+                    Poll::Pending => (),        // Expected when buffer empty
+                    Poll::Ready(None) => (),    // Expected if stream not started
+                    Poll::Ready(Some(_)) => (), // Possible if there's buffered data
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_next_sample_future_poll_with_data() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120);
+
+                let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                if stream.inner().start_capture().is_ok() {
+                    // Wait for frames
+                    std::thread::sleep(Duration::from_millis(200));
+
+                    // Now poll the future
+                    let mut future = stream.next();
+                    let waker = dummy_waker();
+                    let mut cx = Context::from_waker(&waker);
+
+                    let result = Pin::new(&mut future).poll(&mut cx);
+                    // Should have data or be pending
+                    match result {
+                        Poll::Ready(Some(sample)) => {
+                            // Got a frame!
+                            assert!(sample.is_valid() || !sample.is_valid());
+                        }
+                        Poll::Ready(None) => (),
+                        Poll::Pending => (),
+                    }
+
+                    let _ = stream.inner().stop_capture();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_next_sample_after_close() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(160)
+                    .with_height(120);
+
+                let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Screen)
+                    .expect("failed to create stream");
+
+                if stream.inner().start_capture().is_ok() {
+                    let _ = stream.inner().stop_capture();
+
+                    // Clear any buffered data
+                    stream.clear_buffer();
+
+                    // Poll after stop - should return None eventually
+                    let mut future = stream.next();
+                    let waker = dummy_waker();
+                    let mut cx = Context::from_waker(&waker);
+
+                    // May take multiple polls
+                    for _ in 0..5 {
+                        let result = Pin::new(&mut future).poll(&mut cx);
+                        if result == Poll::Ready(None) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// macOS 14.0+ Screenshot tests
+// ============================================================================
+
+#[cfg(feature = "macos_14_0")]
+mod screenshot_tests {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+
+    #[test]
+    fn test_screenshot_capture_sample_buffer() {
+        use screencapturekit::screenshot_manager::SCScreenshotManager;
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(640)
+                    .with_height(480);
+
+                if let Ok(sample) = SCScreenshotManager::capture_sample_buffer(&filter, &config) {
+                    assert!(sample.is_valid());
+                } else {
+                    // May fail without permission
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_screenshot_capture_image() {
+        use screencapturekit::screenshot_manager::SCScreenshotManager;
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+
+        if let Ok(content) = SCShareableContent::get() {
+            if let Some(display) = content.displays().first() {
+                let filter = SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build()
+                    .expect("failed to build content filter");
+
+                let config = SCStreamConfiguration::new()
+                    .with_width(640)
+                    .with_height(480);
+
+                if let Ok(image) = SCScreenshotManager::capture_image(&filter, &config) {
+                    assert!(image.width() > 0);
+                    assert!(image.height() > 0);
+                } else {
+                    // May fail without permission
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// macOS 15.0+ Recording tests
+// ============================================================================
+
+#[cfg(feature = "macos_15_0")]
+mod recording_tests {
+    use screencapturekit::recording_output::{
+        SCRecordingOutputCodec, SCRecordingOutputConfiguration, SCRecordingOutputFileType,
+    };
+
+    #[test]
+    fn test_recording_output_configuration() {
+        let temp_dir = std::env::temp_dir();
+        let output_path = temp_dir.join("test_recording.mov");
+
+        let config = SCRecordingOutputConfiguration::new()
+            .expect("create recording configuration")
+            .with_output_url(&output_path)
+            .expect("output path is valid UTF-8 without NUL bytes")
+            .with_output_file_type(SCRecordingOutputFileType::MOV)
+            .with_video_codec(SCRecordingOutputCodec::H264);
+
+        // Verify configuration was created
+        let _ = config;
+    }
+
+    #[test]
+    fn test_file_type_values() {
+        assert_eq!(SCRecordingOutputFileType::MP4.identifier(), "public.mpeg-4");
+        assert_eq!(
+            SCRecordingOutputFileType::MOV.identifier(),
+            "com.apple.quicktime-movie"
+        );
+        assert_eq!(
+            SCRecordingOutputFileType::default(),
+            SCRecordingOutputFileType::MP4
+        );
+    }
+
+    #[test]
+    fn test_video_codec_type_values() {
+        assert_eq!(SCRecordingOutputCodec::H264.identifier(), "avc1");
+        assert_eq!(SCRecordingOutputCodec::HEVC.identifier(), "hvc1");
+        assert_eq!(
+            SCRecordingOutputCodec::default(),
+            SCRecordingOutputCodec::H264
+        );
+    }
+}
+
+// ============================================================================
+// macOS 14.0+ Content Sharing Picker tests
+// ============================================================================
+
+#[cfg(feature = "macos_14_0")]
+mod content_picker_tests {
+    use screencapturekit::content_sharing_picker::*;
+
+    #[test]
+    fn test_picker_configuration_new() {
+        let config =
+            SCContentSharingPickerConfiguration::new().expect("create picker configuration");
+        // Default should allow changing content
+        let _ = config;
+    }
+
+    #[test]
+    fn test_picker_configuration_allows_changing_content() {
+        let mut config =
+            SCContentSharingPickerConfiguration::new().expect("create picker configuration");
+
+        config.set_allows_changing_selected_content(true);
+        assert!(config.allows_changing_selected_content());
+
+        config.set_allows_changing_selected_content(false);
+        assert!(!config.allows_changing_selected_content());
+    }
+
+    #[test]
+    fn test_picker_configuration_allowed_modes() {
+        let mut config =
+            SCContentSharingPickerConfiguration::new().expect("create picker configuration");
+
+        config.set_allowed_picker_modes(&[
+            SCContentSharingPickerMode::SingleWindow,
+            SCContentSharingPickerMode::MultipleWindows,
+        ]);
+
+        // Just verify it doesn't crash
+        let _ = config;
+    }
+
+    #[test]
+    fn test_picker_configuration_excluded_bundle_ids() {
+        let mut config =
+            SCContentSharingPickerConfiguration::new().expect("create picker configuration");
+
+        config
+            .set_excluded_bundle_ids(&["com.apple.finder", "com.apple.dock"])
+            .expect("bundle IDs have no NUL byte");
+        let excluded = config.excluded_bundle_ids();
+        assert_eq!(excluded.len(), 2);
+        assert!(excluded.contains(&"com.apple.finder".to_string()));
+        assert!(excluded.contains(&"com.apple.dock".to_string()));
+    }
+
+    #[test]
+    fn test_picker_configuration_excluded_window_ids() {
+        let mut config =
+            SCContentSharingPickerConfiguration::new().expect("create picker configuration");
+
+        config.set_excluded_window_ids(&[123, 456, 789]);
+        let excluded = config.excluded_window_ids();
+        assert_eq!(excluded.len(), 3);
+        assert!(excluded.contains(&123));
+        assert!(excluded.contains(&456));
+        assert!(excluded.contains(&789));
+    }
+
+    #[test]
+    fn test_picker_mode_values() {
+        assert_eq!(SCContentSharingPickerMode::SingleWindow as i32, 0);
+        assert_eq!(SCContentSharingPickerMode::MultipleWindows as i32, 1);
+        assert_eq!(SCContentSharingPickerMode::SingleDisplay as i32, 2);
+        assert_eq!(SCContentSharingPickerMode::SingleApplication as i32, 3);
+        assert_eq!(SCContentSharingPickerMode::MultipleApplications as i32, 4);
+    }
+
+    #[test]
+    fn test_picker_mode_debug() {
+        let mode = SCContentSharingPickerMode::SingleWindow;
+        let debug_str = format!("{mode:?}");
+        assert!(debug_str.contains("SingleWindow"));
+    }
+
+    #[test]
+    fn test_picker_mode_clone() {
+        let mode1 = SCContentSharingPickerMode::MultipleWindows;
+        let mode2 = mode1;
+        assert_eq!(mode1, mode2);
+    }
+
+    #[test]
+    fn test_picked_source_variants() {
+        let window_source = SCPickedSource::Window("Test Window".to_string());
+        let display_source = SCPickedSource::Display(1);
+        let app_source = SCPickedSource::Application("Test App".to_string());
+        let unknown_source = SCPickedSource::Unknown;
+
+        // Just verify they can be created
+        let _ = (window_source, display_source, app_source, unknown_source);
+    }
+
+    #[test]
+    fn test_picked_source_debug() {
+        let source = SCPickedSource::Display(1);
+        let debug_str = format!("{source:?}");
+        assert!(debug_str.contains("Display"));
+    }
+
+    #[test]
+    fn test_picker_outcome_debug() {
+        let outcome = SCPickerOutcome::Cancelled;
+        let debug_str = format!("{outcome:?}");
+        assert!(debug_str.contains("Cancelled"));
+    }
+
+    #[test]
+    fn test_picker_filter_outcome_debug() {
+        let outcome = SCPickerFilterOutcome::Cancelled;
+        let debug_str = format!("{outcome:?}");
+        assert!(debug_str.contains("Cancelled"));
+    }
+
+    #[test]
+    fn test_set_maximum_stream_count() {
+        // Just verify it doesn't crash
+        SCContentSharingPicker::set_maximum_stream_count(5).expect("picker is available");
+        SCContentSharingPicker::set_maximum_stream_count(1).expect("picker is available");
+    }
+}
+
+// ============================================================================
+// Async/await tests using tokio runtime
+// ============================================================================
+
+#[cfg(feature = "async")]
+mod tokio_async_tests {
+    use screencapturekit::async_api::*;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    use screencapturekit::stream::output_type::SCStreamOutputType;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_async_shareable_content_get() {
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if content.displays().is_empty() {
+            eprintln!("skip: no displays available");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_shareable_content_with_options() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            AsyncSCShareableContent::create()
+                .with_exclude_desktop_windows(true)
+                .with_on_screen_windows_only(true)
+                .get(),
+        )
+        .await;
+        if !matches!(result, Ok(Ok(_))) {
+            eprintln!("skip: filtered shareable content unavailable");
+        }
+    }
+
+    #[cfg(feature = "macos_14_4")]
+    #[tokio::test]
+    async fn test_async_shareable_content_current_process() {
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            AsyncSCShareableContent::current_process(),
+        )
+        .await;
+        // May or may not succeed depending on permissions
+        let _ = result;
+    }
+
+    #[tokio::test]
+    async fn test_async_stream_next_await() {
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+
+            let config = SCStreamConfiguration::new()
+                .with_width(160)
+                .with_height(120);
+
+            let stream = AsyncSCStream::new(&filter, &config, 5, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            if stream.start_capture().await.is_ok() {
+                // Use tokio timeout to avoid hanging
+                let timeout_result =
+                    tokio::time::timeout(std::time::Duration::from_millis(500), stream.next())
+                        .await;
+
+                match timeout_result {
+                    Ok(Some(_sample)) => {
+                        // Got a frame via async/await path
+                    }
+                    Ok(None) => {
+                        // Stream closed
+                    }
+                    Err(_) => {
+                        // Timeout - that's okay for this test
+                    }
+                }
+
+                let _ = stream.stop_capture().await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_stream_multiple_next_await() {
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+
+            let config = SCStreamConfiguration::new()
+                .with_width(160)
+                .with_height(120);
+
+            let stream = AsyncSCStream::new(&filter, &config, 10, SCStreamOutputType::Screen)
+                .expect("failed to create stream");
+
+            if stream.start_capture().await.is_ok() {
+                // Try to get multiple frames with timeout
+                for _ in 0..3 {
+                    let timeout_result =
+                        tokio::time::timeout(std::time::Duration::from_millis(200), stream.next())
+                            .await;
+
+                    if timeout_result.is_err() {
+                        break; // Timeout is fine
+                    }
+                }
+
+                let _ = stream.stop_capture().await;
+            }
+        }
+    }
+
+    #[cfg(feature = "macos_14_0")]
+    #[tokio::test]
+    async fn test_async_screenshot_capture_image() {
+        use screencapturekit::async_api::AsyncSCScreenshotManager;
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+
+            let config = SCStreamConfiguration::new()
+                .with_width(320)
+                .with_height(240);
+
+            let result = AsyncSCScreenshotManager::capture_image(&filter, &config).await;
+            if let Ok(image) = result {
+                assert!(image.width() > 0);
+                assert!(image.height() > 0);
+            } else {
+                // Permission error is okay
+            }
+        }
+    }
+
+    #[cfg(feature = "macos_14_0")]
+    #[tokio::test]
+    async fn test_async_screenshot_capture_sample_buffer() {
+        use screencapturekit::async_api::AsyncSCScreenshotManager;
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if let Some(display) = content.displays().first() {
+            let filter = SCContentFilter::create()
+                .with_display(display)
+                .with_excluding_windows(&[])
+                .build()
+                .expect("failed to build content filter");
+
+            let config = SCStreamConfiguration::new()
+                .with_width(320)
+                .with_height(240);
+
+            let result = AsyncSCScreenshotManager::capture_sample_buffer(&filter, &config).await;
+            if let Ok(sample) = result {
+                assert!(sample.is_valid());
+            } else {
+                // Permission error is okay
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Additional async coverage tests
+// ============================================================================
+
+#[cfg(feature = "async")]
+mod additional_async_tests {
+    use screencapturekit::async_api::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_async_shareable_content_below_window() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if let Some(window) = content.windows().first() {
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                AsyncSCShareableContent::create()
+                    .with_exclude_desktop_windows(true)
+                    .below_window(window),
+            )
+            .await;
+            // May succeed or fail depending on window state
+            let _ = result;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_shareable_content_above_window() {
+        if !crate::common::screen_capture_allowed() {
+            return;
+        }
+        let Some(content) = super::live_shareable_content().await else {
+            return;
+        };
+        if let Some(window) = content.windows().first() {
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                AsyncSCShareableContent::create()
+                    .with_exclude_desktop_windows(false)
+                    .above_window(window),
+            )
+            .await;
+            // May succeed or fail depending on window state
+            let _ = result;
+        }
+    }
+}
+
+/// Assertive frame-delivery test.
+///
+/// Unlike the API-shape tests above, this drives a real capture and asserts
+/// that frames are actually delivered through the async iterator. It requires
+/// screen-recording permission and an attached display, so it is `#[ignore]`d
+/// by default. Run it manually with:
+///
+/// ```text
+/// cargo test --features async --test async_api_tests -- --ignored frame_delivery
+/// ```
+#[tokio::test]
+#[ignore = "requires screen-recording permission and an attached display"]
+async fn test_async_frame_delivery_assertive() {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    use std::time::Duration;
+    if !crate::common::screen_capture_allowed() {
+        return;
+    }
+
+    let content = SCShareableContent::get().expect("screen-recording permission required");
+    let displays = content.displays();
+    let display = displays.first().expect("an attached display is required");
+
+    let filter = SCContentFilter::create()
+        .with_display(display)
+        .with_excluding_windows(&[])
+        .build()
+        .expect("failed to build content filter");
+    let config = SCStreamConfiguration::new()
+        .with_width(320)
+        .with_height(240);
+
+    let stream = AsyncSCStream::new(&filter, &config, 16, SCStreamOutputType::Screen)
+        .expect("failed to create stream");
+    stream.start_capture().await.expect("start_capture failed");
+
+    // A real frame must be delivered within a reasonable window.
+    let first = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("timed out waiting for the first frame");
+    assert!(first.is_some(), "stream closed before delivering a frame");
+
+    // next() must keep yielding frames (continuous delivery).
+    let second = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("timed out waiting for the second frame");
+    assert!(second.is_some(), "expected continuous frame delivery");
+
+    stream.stop_capture().await.expect("stop_capture failed");
+
+    // A clean stop must not surface a stop error.
+    assert!(
+        stream.take_error().is_none(),
+        "clean capture should leave no stop error"
+    );
+}
+
+// ============================================================================
+// AsyncSCStream lifecycle / sender-accounting regressions
+// ============================================================================
+
+/// Skip-aware fixture: a 320×240 video-only filter and configuration.
+fn async_live_fixture() -> Option<(
+    screencapturekit::stream::content_filter::SCContentFilter,
+    screencapturekit::stream::configuration::SCStreamConfiguration,
+)> {
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    if !crate::common::screen_capture_allowed() {
+        return None;
+    }
+
+    let content = match SCShareableContent::get() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("skip: screen-recording permission required (error: {e:?})");
+            return None;
+        }
+    };
+    let displays = content.displays();
+    let display = displays.first().or_else(|| {
+        eprintln!("skip: no displays available");
+        None
+    })?;
+
+    let filter = SCContentFilter::create()
+        .with_display(display)
+        .with_excluding_windows(&[])
+        .build()
+        .expect("failed to build content filter");
+    let config = SCStreamConfiguration::new()
+        .with_width(320)
+        .with_height(240);
+    Some((filter, config))
+}
+
+/// Regression test: every extra output type gets its own sender, and each
+/// sender used to close the whole queue on drop. Registering a second type —
+/// whether `ScreenCaptureKit` accepts it or rejects it (in which case the
+/// freshly created sender is dropped straight away) — must leave the original
+/// output delivering frames.
+#[tokio::test]
+async fn test_extra_output_type_registration_never_closes_the_stream() {
+    use std::time::Duration;
+
+    let Some((filter, config)) = async_live_fixture() else {
+        return;
+    };
+
+    let mut stream = AsyncSCStream::new(&filter, &config, 8, SCStreamOutputType::Screen)
+        .expect("failed to create stream");
+    assert!(!stream.is_closed(), "stream closed before it was used");
+
+    // Either outcome exercises the sender accounting: on success the queue has
+    // two senders, on failure the second sender is created and immediately
+    // dropped — which used to mark the queue closed.
+    let added = stream.add_output_type(SCStreamOutputType::Audio);
+    eprintln!("add_output_type(Audio) -> {added:?}");
+
+    assert!(
+        !stream.is_closed(),
+        "registering an extra output type closed the whole stream"
+    );
+    assert!(
+        stream.take_error().is_none(),
+        "registering an extra output type must not record a stop error"
+    );
+
+    if let Err(e) = stream.start_capture().await {
+        eprintln!("skip: stream failed to start: {e:?}");
+        return;
+    }
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("timed out waiting for a frame after the extra registration");
+    assert!(
+        frame.is_some(),
+        "the original output stopped delivering after a second registration"
+    );
+
+    stream.stop_capture().await.expect("stop_capture failed");
+}
+
+/// Regression test: a clean stop is never reported through the delegate, so
+/// `stop_capture()` must close the queue itself — otherwise `next()` pends
+/// forever after the last buffered frame.
+#[tokio::test]
+async fn test_clean_stop_closes_the_sample_queue() {
+    use std::time::Duration;
+
+    let Some((filter, config)) = async_live_fixture() else {
+        return;
+    };
+
+    let stream = AsyncSCStream::new(&filter, &config, 8, SCStreamOutputType::Screen)
+        .expect("failed to create stream");
+    if let Err(e) = stream.start_capture().await {
+        eprintln!("skip: stream failed to start: {e:?}");
+        return;
+    }
+
+    let first = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("timed out waiting for the first frame");
+    assert!(first.is_some(), "stream closed before delivering a frame");
+
+    stream.stop_capture().await.expect("stop_capture failed");
+    assert!(stream.is_closed(), "a successful stop must close the queue");
+
+    // Drain whatever was already buffered, then the iterator must terminate
+    // rather than hang.
+    loop {
+        let next = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("next() hung after a clean stop");
+        if next.is_none() {
+            break;
+        }
+    }
+
+    assert!(
+        stream.take_error().is_none(),
+        "a clean stop must not record a stop error"
+    );
+}
+
+/// `ScreenCaptureKit` cannot restart a stopped `SCStream`; the async wrapper
+/// must say so explicitly instead of pending or surfacing an opaque error.
+#[tokio::test]
+async fn test_restart_after_stop_is_rejected() {
+    let Some((filter, config)) = async_live_fixture() else {
+        return;
+    };
+
+    let stream = AsyncSCStream::new(&filter, &config, 4, SCStreamOutputType::Screen)
+        .expect("failed to create stream");
+    if let Err(e) = stream.start_capture().await {
+        eprintln!("skip: stream failed to start: {e:?}");
+        return;
+    }
+    stream.stop_capture().await.expect("stop_capture failed");
+
+    let restart = stream.start_capture().await;
+    let err = restart.expect_err("restarting a stopped stream must fail");
+    assert!(
+        err.to_string().contains("cannot be restarted"),
+        "unexpected restart error: {err}"
+    );
+}
+
+/// Regression test: the queue used to hold a single `Option<Waker>`, so a
+/// second concurrent consumer silently evicted the first one's waker and that
+/// task never woke. Both consumers must make progress.
+#[tokio::test]
+async fn test_two_concurrent_consumers_both_get_woken() {
+    use std::time::Duration;
+
+    let Some((filter, config)) = async_live_fixture() else {
+        return;
+    };
+
+    let stream = std::sync::Arc::new(
+        AsyncSCStream::new(&filter, &config, 16, SCStreamOutputType::Screen)
+            .expect("failed to create stream"),
+    );
+    if let Err(e) = stream.start_capture().await {
+        eprintln!("skip: stream failed to start: {e:?}");
+        return;
+    }
+
+    // Park both consumers before any frame arrives, so each has to be woken by
+    // the capture callback rather than finding a frame already buffered.
+    let a = {
+        let stream = stream.clone();
+        tokio::spawn(async move { stream.next().await.is_some() })
+    };
+    let b = {
+        let stream = stream.clone();
+        tokio::spawn(async move { stream.next().await.is_some() })
+    };
+
+    let got_a = tokio::time::timeout(Duration::from_secs(5), a)
+        .await
+        .expect("first consumer was never woken")
+        .expect("first consumer task panicked");
+    let got_b = tokio::time::timeout(Duration::from_secs(5), b)
+        .await
+        .expect("second consumer was never woken")
+        .expect("second consumer task panicked");
+
+    assert!(got_a && got_b, "both consumers must receive a frame");
+
+    stream.stop_capture().await.expect("stop_capture failed");
+}

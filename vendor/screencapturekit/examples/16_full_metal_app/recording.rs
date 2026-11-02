@@ -1,0 +1,242 @@
+//! Recording capture logic (macOS 15.0+)
+
+#[cfg(feature = "macos_15_0")]
+use screencapturekit::recording_output::{
+    RecordingCallbacks, SCRecordingOutput, SCRecordingOutputCodec, SCRecordingOutputConfiguration,
+    SCRecordingOutputFileType,
+};
+#[cfg(feature = "macos_15_0")]
+use screencapturekit::stream::sc_stream::SCStream;
+#[cfg(feature = "macos_15_0")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "macos_15_0")]
+use std::sync::{Arc, Condvar, Mutex};
+
+/// Recording configuration state
+#[cfg(feature = "macos_15_0")]
+#[derive(Debug, Clone)]
+pub struct RecordingConfig {
+    pub codec: SCRecordingOutputCodec,
+    pub file_type: SCRecordingOutputFileType,
+}
+
+#[cfg(feature = "macos_15_0")]
+impl Default for RecordingConfig {
+    fn default() -> Self {
+        Self {
+            codec: SCRecordingOutputCodec::H264,
+            file_type: SCRecordingOutputFileType::MP4,
+        }
+    }
+}
+
+#[cfg(feature = "macos_15_0")]
+impl RecordingConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply this config to a recording output configuration
+    pub fn apply_to(
+        &self,
+        config: SCRecordingOutputConfiguration,
+    ) -> SCRecordingOutputConfiguration {
+        config
+            .with_video_codec(self.codec.clone())
+            .with_output_file_type(self.file_type.clone())
+    }
+
+    /// Get file extension based on file type
+    pub fn file_extension(&self) -> &'static str {
+        match self.file_type.extension() {
+            Some(extension) => extension,
+            None => "mov",
+        }
+    }
+}
+
+/// Recording state manager
+#[cfg(feature = "macos_15_0")]
+pub struct RecordingState {
+    pub output: Option<SCRecordingOutput>,
+    pub path: Option<String>,
+    pub is_recording: Arc<AtomicBool>,
+    /// Signal when recording finishes (for waiting before opening file)
+    finish_signal: Arc<(Mutex<bool>, Condvar)>,
+}
+
+#[cfg(feature = "macos_15_0")]
+impl RecordingState {
+    pub fn new() -> Self {
+        Self {
+            output: None,
+            path: None,
+            is_recording: Arc::new(AtomicBool::new(false)),
+            finish_signal: Arc::new((Mutex::new(false), Condvar::new())),
+        }
+    }
+
+    /// Check if currently recording
+    pub fn is_active(&self) -> bool {
+        self.is_recording.load(Ordering::Relaxed)
+    }
+
+    /// Start recording to a file
+    pub fn start(&mut self, stream: &SCStream, config: &RecordingConfig) -> Result<String, String> {
+        if self.is_active() {
+            return Err("Already recording".to_string());
+        }
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let path = format!("/tmp/recording_{}.{}", timestamp, config.file_extension());
+
+        let rec_config = config.apply_to(
+            SCRecordingOutputConfiguration::new()
+                .map_err(|e| e.to_string())?
+                .with_output_url(std::path::Path::new(&path))
+                .map_err(|e| e.to_string())?,
+        );
+
+        // Reset finish signal
+        {
+            let (lock, _) = &*self.finish_signal;
+            *lock.lock().unwrap() = false;
+        }
+
+        // Create delegate with finish callback
+        let finish_signal = Arc::clone(&self.finish_signal);
+        let path_for_callback = path.clone();
+        let delegate = RecordingCallbacks::new()
+            .on_start(|| {
+                println!("📹 Recording started");
+            })
+            .on_finish(move || {
+                println!("📹 Recording finished: {path_for_callback}");
+                let (lock, cvar) = &*finish_signal;
+                *lock.lock().unwrap() = true;
+                cvar.notify_all();
+            })
+            .on_fail(|error| {
+                eprintln!("❌ Recording failed: {error}");
+            });
+
+        match SCRecordingOutput::new_with_delegate(&rec_config, delegate) {
+            Some(rec) => match stream.add_recording_output(&rec) {
+                Ok(()) => {
+                    println!("🔴 Recording to: {path}");
+                    self.is_recording.store(true, Ordering::Relaxed);
+                    self.output = Some(rec);
+                    self.path = Some(path.clone());
+                    Ok(path)
+                }
+                Err(e) => Err(format!("Failed to start recording: {e:?}")),
+            },
+            None => Err("Failed to create recording output".to_string()),
+        }
+    }
+
+    /// Stop recording and return the file path
+    pub fn stop(&mut self, stream: &SCStream) -> Option<String> {
+        if !self.is_active() {
+            return None;
+        }
+
+        if let Some(ref rec) = self.output {
+            println!("⏹️  Stopping recording...");
+            let _ = stream.remove_recording_output(rec);
+        }
+
+        self.is_recording.store(false, Ordering::Relaxed);
+
+        // Wait for recording to finish (with timeout)
+        {
+            let (lock, cvar) = &*self.finish_signal;
+            let mut finished = lock.lock().unwrap();
+            let timeout = std::time::Duration::from_secs(5);
+            while !*finished {
+                let result = cvar.wait_timeout(finished, timeout).unwrap();
+                finished = result.0;
+                if result.1.timed_out() {
+                    println!("⚠️  Timeout waiting for recording to finish");
+                    break;
+                }
+            }
+            drop(finished);
+        }
+
+        self.output = None;
+
+        let path = self.path.take();
+        if let Some(ref p) = path {
+            // Small delay to ensure file is fully written
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            if std::path::Path::new(p).exists() {
+                println!("✅ Recording saved: {p}");
+                let _ = std::process::Command::new("open").arg(p).spawn();
+            } else {
+                println!("⚠️  Recording file not found: {p}");
+            }
+        }
+        path
+    }
+
+    /// Get the recording flag for UI display
+    pub fn recording_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.is_recording)
+    }
+}
+
+#[cfg(feature = "macos_15_0")]
+impl Default for RecordingState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Recording config menu
+#[cfg(feature = "macos_15_0")]
+pub struct RecordingConfigMenu;
+
+#[cfg(feature = "macos_15_0")]
+impl RecordingConfigMenu {
+    pub const OPTIONS: &'static [&'static str] = &["Video Codec", "File Type"];
+
+    pub const fn option_count() -> usize {
+        Self::OPTIONS.len()
+    }
+
+    pub fn option_name(idx: usize) -> &'static str {
+        Self::OPTIONS.get(idx).unwrap_or(&"?")
+    }
+
+    pub fn option_value(config: &RecordingConfig, idx: usize) -> String {
+        match idx {
+            0 => config.codec.to_string(),
+            1 => config.file_type.to_string(),
+            _ => "?".to_string(),
+        }
+    }
+
+    pub fn toggle_or_adjust(config: &mut RecordingConfig, idx: usize, _increase: bool) {
+        match idx {
+            0 => {
+                config.codec = if config.codec == SCRecordingOutputCodec::H264 {
+                    SCRecordingOutputCodec::HEVC
+                } else {
+                    SCRecordingOutputCodec::H264
+                };
+            }
+            1 => {
+                config.file_type = if config.file_type == SCRecordingOutputFileType::MP4 {
+                    SCRecordingOutputFileType::MOV
+                } else {
+                    SCRecordingOutputFileType::MP4
+                };
+            }
+            _ => {}
+        }
+    }
+}
