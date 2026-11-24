@@ -100,6 +100,12 @@ fn main() {
                 format!("{xcode_path}/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx");
             println!("cargo:rustc-link-arg=-Wl,-rpath,{swift_lib_path}");
             println!("cargo:rustc-link-search=native={swift_lib_path}");
+            // The standalone Command Line Tools have no Toolchains folder and
+            // keep the static swiftCompatibility* archives here instead.
+            let clt_lib_path = format!("{xcode_path}/usr/lib/swift/macosx");
+            if std::path::Path::new(&clt_lib_path).is_dir() {
+                println!("cargo:rustc-link-search=native={clt_lib_path}");
+            }
         }
     }
 }
